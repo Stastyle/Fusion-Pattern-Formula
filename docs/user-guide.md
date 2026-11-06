@@ -337,6 +337,10 @@ are resolved.
 | `Formula Pattern could not find the saved pattern in the timeline` | The copies being replaced are not in the timeline (dissolved into a base feature, for example). | Delete them by hand and make the pattern again. |
 | Model preview is off above 100 copies | Just information. | OK still builds the result. |
 
+While a saved pattern is being edited the add-in writes what it does to
+`~/.fusion_formula_pattern.log` (emptied each time the add-in starts); attach
+it when reporting a problem with editing.
+
 Start-up problems show a message box:
 
 * **Formula Pattern failed to start** / **could not open the dialog**: the

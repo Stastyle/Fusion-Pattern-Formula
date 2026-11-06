@@ -55,12 +55,16 @@ class TimelineObject(core.Base):
 
     @property
     def index(self):
-        # As in Fusion: -1 for a feature inside a collapsed group and for an expanded group.
-        return self._timeline._index_of(self)
+        # The reference says -1 for a feature inside a collapsed group (and for an expanded
+        # group); Fusion 2026-11-06 raised instead. The fake raises too.
+        index = self._timeline._index_of(self)
+        if index < 0:
+            raise RuntimeError('2 : InternalValidationError : res >= 0')
+        return index
 
     @property
     def isRolledBack(self):
-        index = self.index
+        index = self._timeline._index_of(self)
         return index >= 0 and index >= self._timeline.markerPosition
 
 
@@ -238,16 +242,31 @@ class Feature(core.Base):
     def createForAssemblyContext(self, occurrence):
         return _proxy(self, occurrence)
 
+    def _require_rolled_back(self):
+        # API reference: "To use this property, you need to position the timeline marker to
+        # immediately before this feature." Seen in Fusion 2026-11-06: read without that, the
+        # inputs came back empty.
+        tl = self.timelineObject
+        if tl is None:
+            return
+        group = tl.parentGroup
+        position = group.index if group is not None and group.isCollapsed else tl.index
+        if tl._timeline.markerPosition > position:
+            raise RuntimeError('2 : InternalValidationError : roll the timeline to before this feature first')
+
     @property
     def inputEntities(self):
+        self._require_rolled_back()
         return self.input.inputEntities
 
     @property
     def directionOneEntity(self):
+        self._require_rolled_back()
         return getattr(self.input, 'directionOneEntity', None)
 
     @property
     def axis(self):
+        self._require_rolled_back()
         return getattr(self.input, 'axis', None)
 
     def deleteMe(self):
@@ -387,12 +406,17 @@ class Design(core.Base):
 
 
 class Entity(core.Base):
-    """Any selectable thing: a body, a feature, an edge … (``component`` None: in the root)."""
+    """Any selectable thing: a body, a feature, an edge … (``component`` None: in the root).
+    A face, edge or vertex is made with ``body=``: as in Fusion it knows its body, and only
+    the body knows its component."""
 
-    def __init__(self, name, object_type='BRepEdge', component=None):
+    def __init__(self, name, object_type='BRepEdge', component=None, body=None):
         self.name = name
         self.objectType = 'adsk::fusion::' + object_type
-        self.parentComponent = component
+        if body is not None:
+            self.body = body
+        else:
+            self.parentComponent = component
         self.assemblyContext = None
         self.nativeObject = None
         self.attributes = core.Attributes(self)

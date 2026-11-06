@@ -15,6 +15,8 @@
   copy of another pattern into the *Copies* field switches to it.
 * The Preview group starts closed and opens by itself when there is an
   error to show.
+* While editing, the add-in writes what it does to
+  `~/.fusion_formula_pattern.log` (emptied at start-up) for bug reports.
 * Every copy now carries a `pattern` attribute (the pattern's id) next to
   `settings` and `copy`. Patterns made with 1.0.0 have no id and cannot be
   loaded; the dialog says so.

@@ -42,6 +42,7 @@ class FusionHarness(unittest.TestCase):
         patches = [
             mock.patch.object(command, 'load_settings', return_value={}),
             mock.patch.object(command, 'save_settings', side_effect=self.saved.append),
+            mock.patch.object(command, 'LOG_FILE', None),     # no diagnostics file from the tests
         ]
         for p in patches:
             p.start()
@@ -827,6 +828,35 @@ class EditingSavedPattern(FusionHarness):
         self.assertEqual(selected.assemblyContext.name, 'Neck:1')
         self.assertTrue(self.validate(cmd))
 
+    def test_faces_and_edges_in_a_component_are_reselected_through_their_body(self):
+        # Seen in Fusion 2026-11-06: a Faces pattern in "Fret Jig:1" loaded with Objects and
+        # Direction empty. A face or edge has no parentComponent; its body has.
+        neck = self.design.add_component('Neck', 'Neck:1')
+        body = adsk.fusion.Entity('Body1', 'BRepBody', neck)
+        face = adsk.fusion.Entity('slot face', 'BRepFace', body=body)
+        edge = adsk.fusion.Entity('neck edge', 'BRepEdge', body=body)
+        occurrence = self.design.rootComponent.allOccurrencesByComponent(neck).item(0)
+        cmd, dialog = self.open_dialog()
+        self.choose(cmd, C.ID_OBJECT_TYPE, 'Faces')
+        self.select(cmd, C.ID_OBJECTS, face.createForAssemblyContext(occurrence))
+        self.select(cmd, C.ID_DIRECTION, edge.createForAssemblyContext(occurrence))
+        self.assertTrue(self.preview(cmd).isValidResult, self.preview_text(cmd))
+        self.finish(cmd)
+        feature = self.design.rootComponent.features.rectangularPatternFeatures.item(0)
+        feature.input.inputEntities = adsk.core.ObjectCollection.create()
+        feature.input.inputEntities.add(face)              # read back native, as Fusion does
+        feature.input.directionOneEntity = edge
+
+        cmd, dialog = self.open_dialog()
+        self.pick(cmd, 'Formula Pattern (10 copies)')
+        objects = cmd.commandInputs.itemById(C.ID_OBJECTS).selection(0).entity
+        direction = cmd.commandInputs.itemById(C.ID_DIRECTION).selection(0).entity
+        self.assertIs(objects.nativeObject, face)
+        self.assertEqual(objects.assemblyContext.name, 'Neck:1')
+        self.assertIs(direction.nativeObject, edge)
+        self.assertEqual(direction.assemblyContext.name, 'Neck:1')
+        self.assertTrue(self.validate(cmd))
+
     def test_a_selection_fusion_refused_while_loading_is_completed_before_ok_is_judged(self):
         self.make_linear(count=3, group='Frets')
         cmd, dialog = self.open_dialog()
@@ -875,6 +905,20 @@ class EditingSavedPattern(FusionHarness):
         self.assertEqual(self.highlighted(cmd), feats, 'every copy is highlighted')
         self.assertIn('Editing Frets (4 copies)', self.status(cmd))
         self.assertTrue(self.validate(cmd))
+        timeline = self.design.timeline
+        self.assertEqual(timeline.markerPosition, timeline.count, 'reading the inputs rolls the timeline; it is put back')
+
+    def test_reading_the_inputs_puts_the_marker_back_where_the_user_had_it(self):
+        other = self.design.rootComponent.features.otherFeatures
+        other.add('Base extrude')
+        self.make_linear(count=3, group='Frets')
+        other.add('Fillet1')
+        timeline = self.design.timeline
+        timeline.markerPosition = 2            # before Fillet1
+        cmd, dialog = self.open_dialog()
+        self.pick(cmd, 'Frets (3 copies)')
+        self.assertEqual(cmd.commandInputs.itemById(C.ID_OBJECTS).selection(0).entity.name, 'slot')
+        self.assertEqual(timeline.markerPosition, 2)
 
     def test_choosing_new_pattern_drops_the_edit_and_the_highlight(self):
         old = self.make_linear(count=3, group='Frets')

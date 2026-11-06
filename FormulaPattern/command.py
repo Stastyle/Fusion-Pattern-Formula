@@ -17,6 +17,7 @@ import json
 import math
 import os
 import re
+import time
 import traceback
 import uuid
 
@@ -169,6 +170,11 @@ def start():
     global _app, _ui
     _app = adsk.core.Application.get()
     _ui = _app.userInterface
+    if LOG_FILE:
+        try:
+            open(LOG_FILE, 'w', encoding='utf-8').close()
+        except Exception:
+            pass
 
     cmd_def = _ui.commandDefinitions.itemById(CMD_ID)
     if cmd_def:
@@ -229,6 +235,7 @@ def _find_panel(tab_id: str, panel_id: str):
 
 
 def _report(what: str):
+    _log(f'{what}:\n{traceback.format_exc()}')
     if _ui:
         _ui.messageBox(f'Formula Pattern: {what}\n\n{traceback.format_exc()}')
 
@@ -236,6 +243,21 @@ def _report(what: str):
 # ---------------------------------------------------------------------------
 # The dialog
 # ---------------------------------------------------------------------------
+
+LOG_FILE = os.path.join(os.path.expanduser('~'), '.fusion_formula_pattern.log')
+
+
+def _log(message: str):
+    """Diagnostics for what can only be seen inside Fusion. Appended to LOG_FILE (None: off);
+    start() empties the file."""
+    if not LOG_FILE:
+        return
+    try:
+        with open(LOG_FILE, 'a', encoding='utf-8') as f:
+            f.write(f'{time.strftime("%H:%M:%S")} {message}\n')
+    except Exception:
+        pass
+
 
 class Dialog:
     """Owns the command inputs and knows how to read them, preview them and build the result."""
@@ -628,6 +650,11 @@ class Dialog:
         user changes something (see ``unchanged``)."""
         self._loading = True
         try:
+            _log(f'choose_pattern: {record.label if record else None}')
+            if record is not None:
+                _log(f'  kind={record.kind} copies={len(record.copies)} highlight={len(record.highlight)} '
+                     f'objects={[_describe(e) for e in record.objects]} '
+                     f'reference={_describe(record.reference) if record.reference is not None else None}')
             self.last_error = None
             self.editing = None
             self.dirty = False
@@ -639,10 +666,15 @@ class Dialog:
             self._select_list_entry(record)
             copies.isVisible = status.isVisible = record is not None
             if record is not None:
+                read_inputs(self.design, record)
                 self._pending = self.load_pattern(record)
                 self.editing = record
+                _log(f'  pending after load: {[(i, len(e), t) for i, e, t in self._pending]}')
             self._focus_objects()
             self._update_edit_status()
+        except Exception:
+            _log('choose_pattern failed:\n' + traceback.format_exc())
+            raise
         finally:
             self._loading = False
 
@@ -676,8 +708,9 @@ class Dialog:
             box.formattedText = ''
             return
         text = f'Editing <b>{self.editing.label}</b>. '
-        if self.reselect_needed and (self.selected_objects().count < 1 or
-                                     (self.reference_entity() is None and not (self.sketch_mode and not self.circular))):
+        objects_missing = self.selected_objects().count < 1
+        reference_missing = self.reference_entity() is None and not (self.sketch_mode and not self.circular)
+        if (objects_missing or reference_missing) and not self._pending:
             text += ('Fusion could not re-select its objects or direction. Click its objects and direction '
                      'again, then OK replaces it.')
         elif self.dirty:
@@ -726,14 +759,17 @@ class Dialog:
             sel.clearSelection()
         try:
             sel.hasFocus = True   # addSelection only lands in the input that has focus (Fusion 2026-11)
-        except Exception:
-            pass
+            _log(f'  {input_id}: focus={sel.hasFocus} visible={sel.isVisible} filters={sel.selectionFilters}')
+        except Exception as e:
+            _log(f'  {input_id}: hasFocus failed: {e}')
         missing = []
         for e in entities:
             try:
                 added = sel.addSelection(e)
-            except Exception:
+                _log(f'  {input_id}: addSelection({_describe(e)}) -> {added}; count now {sel.selectionCount}')
+            except Exception as err:
                 added = False
+                _log(f'  {input_id}: addSelection({_describe(e)}) raised {err}')
             if not added:
                 missing.append(e)
         return missing
@@ -815,19 +851,25 @@ class Dialog:
             pass
 
     def is_valid(self) -> bool:
+        valid, why = self._validity()
+        if self.editing is not None:
+            _log(f'is_valid: {valid} ({why})')
+        return valid
+
+    def _validity(self):
         self._complete_pending()
         existing = adsk.core.SelectionCommandInput.cast(self._input(ID_EXISTING))
         if existing.selectionCount and self.editing is None:
-            return False          # something that is not a Formula Pattern copy is selected
+            return False, 'something that is not a Formula Pattern copy is selected'
         if self.selected_objects().count < 1:
-            return False
+            return False, 'no objects'
         if self.reference_entity() is None and not (self.sketch_mode and not self.circular):
-            return False
+            return False, 'no direction / axis'
         try:
             engine.compute_positions(self.spec())
-        except engine.FormulaError:
-            return False
-        return True
+        except engine.FormulaError as e:
+            return False, f'formula: {e}'
+        return True, 'ok'
 
     # ---- building the result ----
 
@@ -1165,18 +1207,7 @@ def _record(pattern_id, copies) -> PatternRecord:
     if not isinstance(settings, dict):
         settings = {}
     kind = 'sketch' if _type_name(source).endswith('Constraint') else 'features'
-    circular = _type_name(source).startswith('Circular')
-    objects, reference = [], None
-    try:
-        if kind == 'sketch':
-            objects = list(source.entities)
-            reference = source.centerPoint if circular else source.directionOneEntity
-        else:
-            inputs = source.inputEntities
-            objects = [inputs.item(k) for k in range(inputs.count)]
-            reference = source.axis if circular else source.directionOneEntity
-    except Exception:
-        pass                      # the user re-selects what could not be read back
+    objects, reference = [], None          # filled by read_inputs() when the pattern is chosen
     n = len(copies)
     count = f'{n} {"copy" if n == 1 else "copies"}'
     position = 10 ** 9            # sketch patterns and anything not in the timeline go last
@@ -1200,6 +1231,42 @@ def _record(pattern_id, copies) -> PatternRecord:
             pass
         label = f'{settings.get("group_name") or DEFAULT_GROUP_NAME} ({count})'
     return PatternRecord(pattern_id, settings, copies, kind, objects, reference, label, highlight, position)
+
+
+def read_inputs(design, record):
+    """Fill ``record.objects`` and ``record.reference`` from its first copy.
+
+    A pattern feature gives its inputEntities and direction back only while the timeline
+    marker sits just before it (API reference; read elsewhere they came back empty, Fusion
+    2026-11-06), so the marker is rolled there for the read and put back afterwards. Sketch
+    constraints can be read as they are.
+    """
+    source = record.copies[0]
+    circular = _type_name(source).startswith('Circular')
+    record.objects, record.reference = [], None
+    timeline = design.timeline
+    before = timeline.markerPosition
+    rolled = False
+    try:
+        if record.kind == 'sketch':
+            record.objects = list(source.entities)
+            record.reference = source.centerPoint if circular else source.directionOneEntity
+        else:
+            timeline.markerPosition = _timeline_index(source)
+            rolled = True
+            inputs = source.inputEntities
+            record.objects = [inputs.item(k) for k in range(inputs.count)]
+            record.reference = source.axis if circular else source.directionOneEntity
+        _log(f'  read_inputs of {_describe(source)}: objects={[_describe(e) for e in record.objects]} '
+             f'reference={_describe(record.reference) if record.reference is not None else None}')
+    except Exception:
+        _log(f'  read_inputs of {_describe(source)} failed:\n{traceback.format_exc()}')
+    finally:
+        if rolled:
+            try:
+                timeline.markerPosition = before
+            except Exception:
+                timeline.moveToEnd()
 
 
 def _find_attributes(design) -> list:
@@ -1270,17 +1337,25 @@ def _copy_number(entity) -> int:
 
 
 def _timeline_index(feature) -> int:
-    """Where a feature sits in the timeline. A feature inside a collapsed group reports -1;
-    the group's own index is the position then."""
+    """Where a feature sits in the timeline. Inside a collapsed group the feature's own index
+    is not available (the reference says -1; Fusion 2026-11 raises "InternalValidationError :
+    res >= 0") and the group's index is the position."""
     tl = feature.timelineObject
-    index = tl.index
-    if index < 0:
+    candidates = [tl]
+    try:
         group = tl.parentGroup
-        if group is not None:
-            index = group.index
-    if index < 0:
-        raise RuntimeError('Formula Pattern could not find the saved pattern in the timeline')
-    return index
+    except Exception:
+        group = None
+    if group is not None:
+        candidates.append(group)
+    for item in candidates:
+        try:
+            index = item.index
+        except Exception:
+            continue
+        if index is not None and index >= 0:
+            return index
+    raise RuntimeError('Formula Pattern could not find the saved pattern in the timeline')
 
 
 def _native(entity):
@@ -1344,11 +1419,9 @@ def _in_root_context(design, entity):
     it lives in another component, which is what Fusion hands out when the user clicks it. A
     pattern feature reads its inputs back in its own component's context instead."""
     try:
-        if entity.assemblyContext is not None:
+        if getattr(entity, 'assemblyContext', None) is not None:
             return entity                       # already a proxy
-        component = getattr(entity, 'parentComponent', None)
-        if component is None:
-            component = entity.parentSketch.parentComponent     # sketch entities
+        component = _owning_component(entity)
         root = design.rootComponent
         if component is None or _same_entity(component, root):
             return entity
@@ -1357,7 +1430,23 @@ def _in_root_context(design, entity):
             return entity
         return entity.createForAssemblyContext(occurrences.item(0)) or entity
     except Exception:
+        _log(f'  _in_root_context({_describe(entity)}) failed:\n{traceback.format_exc()}')
         return entity
+
+
+def _owning_component(entity):
+    """The component an entity lives in: bodies, features and sketches say so themselves; a
+    face, edge or vertex only knows its body; a sketch entity knows its sketch."""
+    for path in (('parentComponent',), ('body', 'parentComponent'), ('parentSketch', 'parentComponent')):
+        value = entity
+        try:
+            for name in path:
+                value = getattr(value, name)
+        except Exception:
+            continue
+        if value is not None:
+            return value
+    return None
 
 
 # ---------------------------------------------------------------------------

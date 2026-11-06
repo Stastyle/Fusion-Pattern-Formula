@@ -167,34 +167,46 @@ Fusion's own API errors look like `<code> : <text>`; `build()` appends a
 description of the selected direction and objects to them so a report from a
 user says what was passed.
 
-Taken from the API reference for the edit path, not yet exercised in Fusion
-(the fake models them this way; if Fusion disagrees, fix the fake first):
+The edit path (all seen in Fusion on 2026-11-06, driving the dialog with
+the diagnostics log on; the fake models them this way):
 
-9. **`TimelineObject.index` is -1 for a feature inside a collapsed group**
-   (and for an expanded group). `_timeline_index()` falls back to the
-   group's index. `Timeline.count` and `markerPosition` count a collapsed
-   group as one item.
-10. **A feature created while the timeline is rolled back is inserted at
+9. **`TimelineObject.index` raises `2 : InternalValidationError : res >= 0`
+   for a feature inside a collapsed group** (the reference says it returns
+   -1). `_timeline_index()` tries the feature, then its `parentGroup`, and
+   takes the first index that comes back. `Timeline.count` and
+   `markerPosition` count a collapsed group as one item.
+10. **A pattern feature gives `inputEntities` and `directionOneEntity` /
+    `axis` back only while the timeline marker is just before it** (the
+    reference says so for these properties; read with the marker at the
+    end they came back empty, and the dialog loaded with no objects).
+    `read_inputs()` sets `markerPosition` to the feature's (or group's)
+    index, reads, and puts the marker back. The entities come back as
+    root-context proxies when the copy was found that way ("via Fret
+    Jig:1"), which is what the selection inputs want; `_in_root_context()`
+    converts natives for the other cases.
+11. **A feature created while the timeline is rolled back is inserted at
     the marker**, which then moves past it. This is what puts the rebuilt
-    copies where the old ones were.
-11. **Deleting a sketch pattern constraint keeps the copied geometry**;
-    `createdEntities` lists it, so the edit path deletes those too.
-12. **`Design.findAttributes(group, name)`** returns the attributes with
-    that name on every entity, with `parent` set; the edit path filters by
-    value (the pattern id). Seen working in Fusion: the list fills.
-13. **`SelectionCommandInput.addSelection()` into an input without focus
-    did nothing** (seen 2026-11: the inputs stayed empty and OK stayed
-    off, with no error). `_fill_selection()` gives the input focus first,
-    checks the return value, and the leftovers are retried from
-    validateInputs, which the reference names as a good place for it. An
-    invisible input cannot take focus, so the *Copies* input is shown
-    before it is filled.
-14. **Selection inputs want root-context proxies** for geometry in a child
-    component (what the user's click hands out), while a pattern feature
-    reads its `inputEntities` back in its own component. `_in_root_context()`
-    converts with `createForAssemblyContext` through
-    `rootComponent.allOccurrencesByComponent`. From the reference; the
-    fake models it.
+    copies where the old ones were (24 copies replaced by 22 in the same
+    group, OK, undo all fine).
+12. **Deleting a sketch pattern constraint keeps the copied geometry**;
+    `createdEntities` lists it, so the edit path deletes those too (from
+    the reference; not yet exercised).
+13. **`Design.findAttributes(group, name)`** returns the attributes with
+    that name on every entity, with `parent` set (as a proxy for entities
+    in a component); the edit path filters by value (the pattern id).
+14. **`SelectionCommandInput.addSelection()`** works from `inputChanged`
+    once the input has focus and the entity is in the root context;
+    `_fill_selection()` gives the input focus first, checks the return
+    value, and leftovers are retried from validateInputs. An invisible
+    input cannot take focus, so the *Copies* input is shown before it is
+    filled.
+
+**Diagnostics log.** `command.py` appends what the edit path does to
+`~/.fusion_formula_pattern.log` (emptied when the add-in starts): the
+pattern chosen, what was read back, every `addSelection` and its result,
+and why `is_valid()` said no while a pattern is loaded. Read it when the
+dialog misbehaves inside Fusion; set `LOG_FILE = None` to turn it off (the
+tests do).
 
 ## Checking API names offline
 
