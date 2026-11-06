@@ -171,3 +171,7 @@ The tests run without Fusion: a small fake of the `adsk` API lives in
 ```bash
 python -m unittest discover -s tests -v
 ```
+
+## License
+
+[MIT](LICENSE).
