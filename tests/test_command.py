@@ -88,9 +88,12 @@ class FusionHarness(unittest.TestCase):
         self.changed(cmd, input_id)
 
     def select(self, cmd, input_id, *entities):
+        """What a user does: click the input (it takes focus), then click the entities."""
         sel = cmd.commandInputs.itemById(input_id)
+        sel.hasFocus = True
         for e in entities:
-            sel.addSelection(e if isinstance(e, adsk.core.Base) else adsk.fusion.Entity(e))
+            added = sel.addSelection(e if isinstance(e, adsk.core.Base) else adsk.fusion.Entity(e))
+            self.assertTrue(added, f'{input_id} refused {e}')
         self.changed(cmd, input_id)
 
     def validate(self, cmd):
@@ -353,9 +356,9 @@ class Validation(FusionHarness):
 
     def test_circular_needs_an_axis_not_a_direction(self):
         cmd, dialog = self.open_dialog()
-        self.choose(cmd, C.ID_TYPE, 'Circular')
         self.select(cmd, C.ID_OBJECTS, 'rib')
         self.select(cmd, C.ID_DIRECTION, 'edge')
+        self.choose(cmd, C.ID_TYPE, 'Circular')     # the direction is hidden now and does not count
         self.assertFalse(self.validate(cmd))
         self.select(cmd, C.ID_AXIS, 'cylinder')
         self.assertTrue(self.validate(cmd))
@@ -761,6 +764,92 @@ class EditingSavedPattern(FusionHarness):
         sel = cmd.commandInputs.itemById(C.ID_EXISTING)
         return [sel.selection(k).entity for k in range(sel.selectionCount)]
 
+    def status(self, cmd):
+        return cmd.commandInputs.itemById(C.ID_EDIT_STATUS).text
+
+    # ---- the dialog around editing ----
+
+    def test_edit_group_comes_first_with_the_copies_and_status_hidden_until_a_pattern_is_picked(self):
+        self.make_linear(count=3, group='Frets')
+        cmd, dialog = self.open_dialog()
+        inputs = cmd.commandInputs
+        self.assertEqual(inputs.item(0).id, C.ID_EDIT_GROUP, 'new or saved pattern is the first choice')
+        self.assertTrue(inputs.itemById(C.ID_OBJECTS).hasFocus, 'clicks go to Objects, not to Copies')
+        self.assertFalse(inputs.itemById(C.ID_EXISTING).isVisible)
+        self.assertFalse(inputs.itemById(C.ID_EDIT_STATUS).isVisible)
+        self.pick(cmd, 'Frets (3 copies)')
+        self.assertTrue(inputs.itemById(C.ID_EXISTING).isVisible)
+        self.assertTrue(inputs.itemById(C.ID_EDIT_STATUS).isVisible)
+        self.assertTrue(inputs.itemById(C.ID_OBJECTS).hasFocus, 'focus is back on Objects after loading')
+        self.pick(cmd, 'New pattern')
+        self.assertFalse(inputs.itemById(C.ID_EXISTING).isVisible)
+        self.assertFalse(inputs.itemById(C.ID_EDIT_STATUS).isVisible)
+
+    def test_status_says_what_ok_will_do(self):
+        self.make_linear(count=3, group='Frets')
+        cmd, dialog = self.open_dialog()
+        self.pick(cmd, 'Frets (3 copies)')
+        self.assertIn('Editing Frets (3 copies)', self.status(cmd))
+        self.assertIn('Change anything', self.status(cmd))
+        self.assertTrue(self.validate(cmd), 'OK is available right away')
+        cmd.commandInputs.itemById(C.ID_COUNT).value = 4
+        self.changed(cmd, C.ID_COUNT)
+        self.assertIn('OK replaces it', self.status(cmd))
+        self.assertNotIn('Change anything', self.status(cmd))
+
+    def test_preview_group_is_collapsed_until_an_error_needs_showing(self):
+        cmd, dialog = self.open_dialog()
+        group = cmd.commandInputs.itemById(C.ID_PREVIEW_GROUP)
+        self.assertFalse(group.isExpanded)
+        self.ready_linear(cmd)
+        self.assertFalse(group.isExpanded)
+        self.set_text(cmd, C.ID_FORMULA, 'a * (')
+        self.assertTrue(group.isExpanded, 'an error must be seen')
+
+    def test_objects_in_a_component_are_reselected_in_the_root_context(self):
+        neck = self.design.add_component('Neck', 'Neck:1')
+        slot = adsk.fusion.Entity('slot', 'BRepBody', neck)
+        cmd, dialog = self.open_dialog()
+        self.select(cmd, C.ID_OBJECTS, slot.createForAssemblyContext(self.design.rootComponent.allOccurrencesByComponent(neck).item(0)))
+        self.select(cmd, C.ID_DIRECTION, 'neck edge')
+        self.assertTrue(self.preview(cmd).isValidResult, self.preview_text(cmd))
+        self.finish(cmd)
+        # What the pattern feature reads back is the body in its own component; Fusion's
+        # selection inputs want the proxy the user would have clicked.
+        feature = self.design.rootComponent.features.rectangularPatternFeatures.item(0)
+        feature.input.inputEntities = adsk.core.ObjectCollection.create()
+        feature.input.inputEntities.add(slot)
+
+        cmd, dialog = self.open_dialog()
+        self.pick(cmd, 'Formula Pattern (10 copies)')
+        selected = cmd.commandInputs.itemById(C.ID_OBJECTS).selection(0).entity
+        self.assertIs(selected.nativeObject, slot)
+        self.assertEqual(selected.assemblyContext.name, 'Neck:1')
+        self.assertTrue(self.validate(cmd))
+
+    def test_a_selection_fusion_refused_while_loading_is_completed_before_ok_is_judged(self):
+        self.make_linear(count=3, group='Frets')
+        cmd, dialog = self.open_dialog()
+        cmd.commandInputs.itemById(C.ID_OBJECTS).fail_next_add = 1
+        self.pick(cmd, 'Frets (3 copies)')
+        self.assertEqual(cmd.commandInputs.itemById(C.ID_OBJECTS).selectionCount, 0)
+        self.assertTrue(self.validate(cmd), 'validateInputs retries the selection')
+        self.assertEqual(cmd.commandInputs.itemById(C.ID_OBJECTS).selection(0).entity.name, 'slot')
+        self.assertNotIn('could not', self.status(cmd))
+
+    def test_a_selection_fusion_keeps_refusing_is_asked_of_the_user(self):
+        self.make_linear(count=3, group='Frets')
+        cmd, dialog = self.open_dialog()
+        cmd.commandInputs.itemById(C.ID_OBJECTS).fail_next_add = 3     # the load and two retries
+        self.pick(cmd, 'Frets (3 copies)')
+        self.assertFalse(self.validate(cmd))
+        self.assertFalse(self.validate(cmd))
+        self.assertIn('could not re-select', self.status(cmd))
+        self.assertIn('Click its objects', self.status(cmd))
+        self.select(cmd, C.ID_OBJECTS, 'slot')
+        self.assertTrue(self.validate(cmd))
+        self.assertNotIn('could not', self.status(cmd))
+
     # ---- the list ----
 
     def test_the_list_offers_every_saved_pattern_in_timeline_order(self):
@@ -784,8 +873,7 @@ class EditingSavedPattern(FusionHarness):
         self.assertEqual(cmd.commandInputs.itemById(C.ID_OBJECTS).selection(0).entity.name, 'slot')
         self.assertEqual(cmd.commandInputs.itemById(C.ID_DIRECTION).selection(0).entity.name, 'neck edge')
         self.assertEqual(self.highlighted(cmd), feats, 'every copy is highlighted')
-        self.assertIn('Editing', self.preview_text(cmd))
-        self.assertIn('Frets (4 copies)', self.preview_text(cmd))
+        self.assertIn('Editing Frets (4 copies)', self.status(cmd))
         self.assertTrue(self.validate(cmd))
 
     def test_choosing_new_pattern_drops_the_edit_and_the_highlight(self):
@@ -799,14 +887,17 @@ class EditingSavedPattern(FusionHarness):
         self.assertFalse(any(f._deleted for f in old))
         self.assertEqual(self.design.rootComponent.features.rectangularPatternFeatures.count, 6)
 
-    def test_clicking_a_copy_selects_its_entry_in_the_list_and_highlights_the_rest(self):
+    def test_clicking_a_copy_of_another_pattern_switches_to_it(self):
         feats = self.make_linear(count=3, group='Frets')
         self.make_linear(count=2, group='Louvres')
         cmd, dialog = self.open_dialog()
-        self.load(cmd, feats[1])
+        self.pick(cmd, 'Louvres (2 copies)')
+        self.click_copy(cmd, feats[1])
         self.assertEqual(cmd.commandInputs.itemById(C.ID_PATTERN_LIST).selectedItem.name, 'Frets (3 copies)')
         self.assertEqual(self.highlighted(cmd), feats)
         self.assertEqual(dialog.editing.id, feats[0].attributes.itemByName('FormulaPattern', 'pattern').value)
+        self.assertEqual(dialog.count, 3)
+        self.assertTrue(cmd.commandInputs.itemById(C.ID_OBJECTS).hasFocus)
 
     def test_nothing_is_rebuilt_until_something_changes(self):
         old = self.make_linear(count=3, group='Frets')
@@ -876,7 +967,8 @@ class EditingSavedPattern(FusionHarness):
         self.finish(cmd)
         return list(self.design.rootComponent.features.rectangularPatternFeatures.created)
 
-    def load(self, cmd, entity):
+    def click_copy(self, cmd, entity):
+        """Click a copy into the Copies input (shown once a pattern is being edited)."""
         self.select(cmd, C.ID_EXISTING, entity)
 
     # ---- loading ----
@@ -887,25 +979,6 @@ class EditingSavedPattern(FusionHarness):
         self.assertEqual(len(ids), 1)
         self.assertTrue(next(iter(ids)))
 
-    def test_picking_a_copy_loads_its_settings_objects_and_direction(self):
-        feats = self.make_linear(count=4, group='Frets')
-        cmd, dialog = self.open_dialog()
-        self.choose(cmd, C.ID_TYPE, 'Circular')          # the dialog must switch back to linear
-        self.load(cmd, feats[2])
-        self.assertFalse(dialog.circular)
-        self.assertEqual(dialog.object_type, 'Bodies')
-        self.assertEqual(dialog.preset_id, 'frets')
-        self.assertEqual(dialog.count, 4)
-        self.assertEqual(dialog.group_name, 'Frets')
-        objects = cmd.commandInputs.itemById(C.ID_OBJECTS)
-        self.assertEqual([objects.selection(k).entity.name for k in range(objects.selectionCount)], ['slot'])
-        direction = cmd.commandInputs.itemById(C.ID_DIRECTION)
-        self.assertEqual(direction.selection(0).entity.name, 'neck edge')
-        self.assertTrue(dialog.editing)
-        self.assertIn('Editing', self.preview_text(cmd))
-        self.assertIn('Frets', self.preview_text(cmd))
-        self.assertTrue(self.validate(cmd))
-
     def test_loading_a_circular_pattern_switches_the_type_and_fills_the_axis(self):
         cmd, dialog = self.open_dialog()
         self.choose(cmd, C.ID_TYPE, 'Circular')
@@ -914,10 +987,9 @@ class EditingSavedPattern(FusionHarness):
         self.choose(cmd, C.ID_PRESET, 'Golden angle (phyllotaxis)')
         self.preview(cmd)
         self.finish(cmd)
-        copy = self.design.rootComponent.features.circularPatternFeatures.item(1)
 
         cmd, dialog = self.open_dialog()
-        self.load(cmd, copy)
+        self.pick(cmd, 'Formula Pattern (10 copies)')
         self.assertTrue(dialog.circular)
         self.assertEqual(dialog.preset_id, 'golden_angle')
         self.assertEqual(cmd.commandInputs.itemById(C.ID_OBJECTS).selection(0).entity.name, 'rib')
@@ -925,23 +997,28 @@ class EditingSavedPattern(FusionHarness):
         self.assertTrue(self.validate(cmd))
 
     def test_a_feature_that_is_not_a_formula_pattern_copy_is_refused(self):
+        self.make_linear(count=3, group='Frets')
         cmd, dialog = self.open_dialog()
-        self.ready_linear(cmd)
-        self.load(cmd, self.design.rootComponent.features.otherFeatures.add('Fillet1'))
+        self.pick(cmd, 'Frets (3 copies)')
+        self.click_copy(cmd, self.design.rootComponent.features.otherFeatures.add('Fillet1'))
         self.assertFalse(dialog.editing)
         self.assertFalse(self.validate(cmd), 'OK must stay off until the stray selection is cleared')
         self.assertIn('not a copy made by Formula Pattern', self.preview_text(cmd))
+        self.assertEqual(cmd.commandInputs.itemById(C.ID_PATTERN_LIST).selectedItem.name, 'New pattern')
         cmd.commandInputs.itemById(C.ID_EXISTING).clearSelection()
         self.changed(cmd, C.ID_EXISTING)
-        self.assertTrue(self.validate(cmd))
+        self.assertTrue(self.validate(cmd), 'the loaded objects and direction are still there')
         self.assertNotIn('not a copy', self.preview_text(cmd))
 
     def test_a_copy_made_by_an_older_version_says_so(self):
+        self.make_linear(count=3, group='Frets')
         old = self.design.rootComponent.features.otherFeatures.add('Formula Pattern 1/3')
         old.attributes.add('FormulaPattern', 'settings', '{}')
         old.attributes.add('FormulaPattern', 'copy', '1')
         cmd, dialog = self.open_dialog()
-        self.load(cmd, old)
+        self.assertEqual(self.list_names(cmd), ['New pattern', 'Frets (3 copies)'], 'no id: not listed')
+        self.pick(cmd, 'Frets (3 copies)')
+        self.click_copy(cmd, old)
         self.assertFalse(dialog.editing)
         self.assertIn('older version', self.preview_text(cmd))
 
@@ -957,7 +1034,7 @@ class EditingSavedPattern(FusionHarness):
         old_id = old[0].attributes.itemByName('FormulaPattern', 'pattern').value
 
         cmd, dialog = self.open_dialog()
-        self.load(cmd, old[1])
+        self.pick(cmd, 'Frets (3 copies)')
         cmd.commandInputs.itemById(C.ID_COUNT).value = 5
         self.changed(cmd, C.ID_COUNT)
         args = self.preview(cmd)
@@ -982,7 +1059,7 @@ class EditingSavedPattern(FusionHarness):
         timeline = self.design.timeline
         timeline.markerPosition = 2            # before Fillet1
         cmd, dialog = self.open_dialog()
-        self.load(cmd, old[0])
+        self.pick(cmd, 'Frets (3 copies)')
         cmd.commandInputs.itemById(C.ID_COUNT).value = 2
         self.changed(cmd, C.ID_COUNT)
         self.assertTrue(self.preview(cmd).isValidResult, self.preview_text(cmd))
@@ -993,7 +1070,7 @@ class EditingSavedPattern(FusionHarness):
         old = self.make_linear(count=1)
         self.assertEqual(self.design.timeline.timelineGroups.count, 0)
         cmd, dialog = self.open_dialog()
-        self.load(cmd, old[0])
+        self.pick(cmd, 'Frets (1 copy)')
         cmd.commandInputs.itemById(C.ID_COUNT).value = 3
         self.changed(cmd, C.ID_COUNT)
         self.assertTrue(self.preview(cmd).isValidResult, self.preview_text(cmd))
@@ -1001,13 +1078,14 @@ class EditingSavedPattern(FusionHarness):
         self.assertEqual(feats.count, 3)
         self.assertTrue(old[0]._deleted)
 
-    def test_clearing_the_saved_pattern_makes_a_new_pattern_next_to_the_old_one(self):
+    def test_clearing_the_copies_field_makes_a_new_pattern_next_to_the_old_one(self):
         old = self.make_linear(count=3)
         cmd, dialog = self.open_dialog()
-        self.load(cmd, old[0])
-        cmd.commandInputs.itemById(C.ID_EXISTING).clearSelection()
+        self.pick(cmd, 'Frets (3 copies)')
+        cmd.commandInputs.itemById(C.ID_EXISTING).clearSelection()    # the user empties the highlight
         self.changed(cmd, C.ID_EXISTING)
         self.assertFalse(dialog.editing)
+        self.assertEqual(cmd.commandInputs.itemById(C.ID_PATTERN_LIST).selectedItem.name, 'New pattern')
         self.assertTrue(self.preview(cmd).isValidResult, self.preview_text(cmd))
         feats = self.design.rootComponent.features.rectangularPatternFeatures
         self.assertEqual(feats.count, 6)
@@ -1019,7 +1097,7 @@ class EditingSavedPattern(FusionHarness):
     def test_a_formula_error_while_editing_leaves_the_old_pattern_alone(self):
         old = self.make_linear(count=3)
         cmd, dialog = self.open_dialog()
-        self.load(cmd, old[0])
+        self.pick(cmd, 'Frets (3 copies)')
         self.set_text(cmd, C.ID_FORMULA, 'a * (')
         self.assertFalse(self.preview(cmd).isValidResult)
         self.assertFalse(any(f._deleted for f in old))
@@ -1043,8 +1121,9 @@ class EditingSavedPattern(FusionHarness):
         self.assertEqual(len(old_copies), 3)
 
         cmd, dialog = self.open_dialog()
-        self.load(cmd, old_copies[1])                 # the user clicks the second copy
+        self.pick(cmd, 'Fretboard sketch pattern (3 copies)')
         self.assertTrue(dialog.editing)
+        self.assertEqual(self.highlighted(cmd), old_copies, 'the copied curves are highlighted')
         self.assertEqual(dialog.object_type, 'Sketch curves')
         self.assertEqual(dialog.preset_id, 'frets')
         self.assertEqual(dialog.count, 3)
@@ -1073,10 +1152,16 @@ class EditingSavedPattern(FusionHarness):
         self.assertTrue(self.preview(cmd).isValidResult, self.preview_text(cmd))
         self.finish(cmd)
         cmd, dialog = self.open_dialog()
-        self.load(cmd, spoke)                          # the original carries the constraints too
+        self.pick(cmd, 'Wheel sketch pattern (10 copies)')
         self.assertTrue(dialog.editing)
         self.assertTrue(dialog.circular)
         self.assertIs(cmd.commandInputs.itemById(C.ID_AXIS).selection(0).entity, hub)
+        # The original carries the constraints too, so clicking it picks the same pattern.
+        self.pick(cmd, 'New pattern')
+        self.pick(cmd, 'Wheel sketch pattern (10 copies)')
+        self.click_copy(cmd, spoke)
+        self.assertTrue(dialog.editing)
+        self.assertEqual(len(self.highlighted(cmd)), 10)
 
     def test_the_copies_input_accepts_features_and_sketch_curves_without_limit(self):
         cmd, dialog = self.open_dialog()

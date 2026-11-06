@@ -190,7 +190,23 @@ class SelectionCommandInput(CommandInput):
         self.selectionFilters = []
         self._min, self._max = 1, 1
         self._selections = []
-        self.hasFocus = False
+        self._has_focus = False
+        self.fail_next_add = 0     # test hook: refuse the next n addSelection() calls
+
+    @property
+    def hasFocus(self):
+        return self._has_focus
+
+    @hasFocus.setter
+    def hasFocus(self, value):
+        # Documented: only one selection input has focus, and an invisible one cannot take it.
+        if value and not self.isVisible:
+            raise RuntimeError('3 : InternalValidationError : hasFocus')
+        if value:
+            for other in self._inputs._registry.values():
+                if isinstance(other, SelectionCommandInput):
+                    other._has_focus = False
+        self._has_focus = bool(value)
 
     def addSelectionFilter(self, f):
         self.selectionFilters.append(f)
@@ -215,6 +231,13 @@ class SelectionCommandInput(CommandInput):
         return self._selections[index]
 
     def addSelection(self, entity):
+        if self.fail_next_add:
+            self.fail_next_add -= 1
+            return False
+        if not self._has_focus:
+            # Seen in Fusion (2026-11): programmatic selections into an input without focus
+            # never showed up, and OK stayed disabled. Give the input focus first.
+            return False
         self._selections.append(Selection(entity))
         return True
 

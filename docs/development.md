@@ -48,24 +48,32 @@ position / gap mode, flip and the 360° wrap, and reports errors per copy.
   values as JSON), `copy` (its number) and `pattern` (a uuid shared by all
   copies of one pattern).
 * Editing: `list_patterns()` runs when the dialog is created and fills the
-  *Saved pattern* drop-down (`ID_PATTERN_LIST`) with one `PatternRecord`
-  per pattern id, found through `Design.findAttributes` and, as a backstop,
-  by walking the timeline (groups included) and the active sketch's
-  constraints. A record holds the copies, the objects and direction read
-  back from the first copy, a label (group name and copy count, or sketch
-  name for sketch patterns) and what to highlight. `choose_pattern()`
-  selects the entry, calls `load_pattern()` to fill the inputs, and puts
-  the copies (features, or the copied sketch curves) into the *Copies*
-  selection input (`ID_EXISTING`), which is how Fusion highlights them; a
-  copy clicked into that input goes through `find_pattern()` to the same
-  place. `dirty` is set by any later input change; while a loaded pattern
-  is `unchanged`, neither the preview nor OK rebuilds anything. `build()`
-  clears the highlight (it would hold deleted entities) and calls
-  `_remove_existing()` before creating the new copies: for features that
-  rolls the timeline marker to the old copies' position, deletes them,
-  builds (new features are inserted at the marker), and puts the marker
-  back; for sketch constraints it deletes each constraint and its
-  `createdEntities`. The edited pattern keeps its id.
+  *Saved pattern* drop-down (`ID_PATTERN_LIST`, first group of the dialog)
+  with one `PatternRecord` per pattern id, found through
+  `Design.findAttributes` and, as a backstop, by walking the timeline
+  (groups included) and the active sketch's constraints. A record holds
+  the copies, the objects and direction read back from the first copy, a
+  label (group name and copy count, or sketch name for sketch patterns) and
+  what to highlight. `choose_pattern()` selects the entry, shows the
+  *Copies* selection input (`ID_EXISTING`) and the status text box
+  (`ID_EDIT_STATUS`), and calls `load_pattern()`, which applies the
+  settings and fills three selection inputs through `_fill_selection()`:
+  the copies (features, or the copied sketch curves) into *Copies*, which
+  is how Fusion highlights them, then the objects and the direction / axis,
+  each converted to a root-context proxy by `_in_root_context()`. Every
+  entity Fusion refused is kept in `_pending`; `is_valid()` (validateInputs)
+  retries them twice and then sets `reselect_needed`, which the status line
+  turns into a request to click them. Focus goes back to *Objects* at the
+  end, and `_loading` keeps the input-changed handler from treating our own
+  fills as clicks. A copy clicked into *Copies* goes through
+  `find_pattern()` to `choose_pattern()`. `dirty` is set by any later input
+  change; while a loaded pattern is `unchanged`, neither the preview nor OK
+  rebuilds anything. `build()` clears the highlight (it would hold deleted
+  entities) and calls `_remove_existing()` before creating the new copies:
+  for features that rolls the timeline marker to the old copies' position,
+  deletes them, builds (new features are inserted at the marker), and puts
+  the marker back; for sketch constraints it deletes each constraint and
+  its `createdEntities`. The edited pattern keeps its id.
 * The handler classes map Fusion's events onto the dialog:
   commandCreated → `Dialog(cmd)` + handler registration; activate →
   `on_activate()`; inputChanged → `on_input_changed()`; validateInputs →
@@ -173,7 +181,20 @@ Taken from the API reference for the edit path, not yet exercised in Fusion
     `createdEntities` lists it, so the edit path deletes those too.
 12. **`Design.findAttributes(group, name)`** returns the attributes with
     that name on every entity, with `parent` set; the edit path filters by
-    value (the pattern id).
+    value (the pattern id). Seen working in Fusion: the list fills.
+13. **`SelectionCommandInput.addSelection()` into an input without focus
+    did nothing** (seen 2026-11: the inputs stayed empty and OK stayed
+    off, with no error). `_fill_selection()` gives the input focus first,
+    checks the return value, and the leftovers are retried from
+    validateInputs, which the reference names as a good place for it. An
+    invisible input cannot take focus, so the *Copies* input is shown
+    before it is filled.
+14. **Selection inputs want root-context proxies** for geometry in a child
+    component (what the user's click hands out), while a pattern feature
+    reads its `inputEntities` back in its own component. `_in_root_context()`
+    converts with `createForAssemblyContext` through
+    `rootComponent.allOccurrencesByComponent`. From the reference; the
+    fake models it.
 
 ## Checking API names offline
 

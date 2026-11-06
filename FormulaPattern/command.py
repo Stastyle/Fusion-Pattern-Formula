@@ -85,6 +85,7 @@ ID_GROUP_NAME = 'fpGroupName'
 ID_EDIT_GROUP = 'fpEditGroup'
 ID_PATTERN_LIST = 'fpPatternList'
 ID_EXISTING = 'fpExisting'
+ID_EDIT_STATUS = 'fpEditStatus'
 NEW_PATTERN_LABEL = 'New pattern'
 
 OBJECT_SKETCH = 'Sketch curves'
@@ -253,6 +254,9 @@ class Dialog:
         self.editing = None           # PatternRecord of the saved pattern being edited, if any
         self.dirty = False            # something changed since the saved pattern was loaded
         self.patterns = []            # PatternRecords offered in the "Saved pattern" list, in order
+        self._pending = []            # selections Fusion did not take yet: (input id, entities, tries)
+        self.reselect_needed = False  # Fusion kept refusing them: the user has to click them
+        self._loading = False         # choose_pattern() is filling the inputs
         self.saved = load_settings()
         self._build()
         self._apply_settings(self.saved)
@@ -268,6 +272,12 @@ class Dialog:
         """
         saved, self.saved = self.saved, {}
         self._apply_number_settings(saved)
+        try:
+            # The first selection input in the dialog would get the focus otherwise, and that is
+            # now the hidden Copies input of the edit group: clicks must go to Objects.
+            adsk.core.SelectionCommandInput.cast(self._input(ID_OBJECTS)).hasFocus = True
+        except Exception:
+            pass
         self.refresh_preview()
 
     @staticmethod
@@ -281,6 +291,32 @@ class Dialog:
 
     def _build(self):
         inputs = self.inputs
+
+        # New pattern, or one of the saved ones? That is the first choice, so it comes first.
+        group = inputs.addGroupCommandInput(ID_EDIT_GROUP, 'Edit a saved pattern')
+        group.isExpanded = True
+        try:
+            self.patterns = list_patterns(self.design, self.active_sketch)
+        except Exception:
+            self.patterns = []
+        dd = group.children.addDropDownCommandInput(ID_PATTERN_LIST, 'Saved pattern',
+                                                    adsk.core.DropDownStyles.TextListDropDownStyle)
+        dd.listItems.add(NEW_PATTERN_LABEL, True)
+        for record in self.patterns:
+            dd.listItems.add(record.label, False)
+        dd.tooltip = ('Every pattern made by Formula Pattern in this design. Pick one to load its objects, '
+                      'direction, formula and values and to highlight its copies; OK then replaces it in '
+                      'place. "New pattern" makes a new one.')
+        sel = group.children.addSelectionInput(ID_EXISTING, 'Copies', PROMPTS['copies'])
+        self._set_filters(sel, EXISTING_FILTERS)
+        sel.setSelectionLimits(0, 0)
+        sel.isVisible = False
+        sel.tooltip = ('The copies of the chosen pattern, highlighted in the model and the timeline. '
+                       'Clicking any copy of a Formula Pattern here (a feature in its timeline group, a '
+                       'face it created, or a patterned sketch curve) picks that pattern instead.')
+        status = group.children.addTextBoxCommandInput(ID_EDIT_STATUS, '', '', 2, True)
+        status.isFullWidth = True
+        status.isVisible = False
 
         dd = inputs.addDropDownCommandInput(ID_TYPE, 'Pattern type', adsk.core.DropDownStyles.TextListDropDownStyle)
         dd.listItems.add('Linear', True)
@@ -340,32 +376,11 @@ class Dialog:
         notes.isFullWidth = True
 
         group = inputs.addGroupCommandInput(ID_PREVIEW_GROUP, 'Preview')
-        group.isExpanded = True
+        group.isExpanded = False          # opened by refresh_preview() when there is an error to see
         preview = group.children.addTextBoxCommandInput(ID_PREVIEW, '', '', 9, True)
         preview.isFullWidth = True
         live = group.children.addBoolValueInput(ID_LIVE, 'Show in model', True, '', True)
         live.tooltip = f'Build the copies while the dialog is open. Turned off automatically above {MAX_MODEL_PREVIEW} copies.'
-
-        group = inputs.addGroupCommandInput(ID_EDIT_GROUP, 'Edit a saved pattern')
-        group.isExpanded = True
-        try:
-            self.patterns = list_patterns(self.design, self.active_sketch)
-        except Exception:
-            self.patterns = []
-        dd = group.children.addDropDownCommandInput(ID_PATTERN_LIST, 'Saved pattern',
-                                                    adsk.core.DropDownStyles.TextListDropDownStyle)
-        dd.listItems.add(NEW_PATTERN_LABEL, True)
-        for record in self.patterns:
-            dd.listItems.add(record.label, False)
-        dd.tooltip = ('Every pattern made by Formula Pattern in this design. Pick one to load its objects, '
-                      'direction, formula and values and to highlight its copies; OK then replaces it in '
-                      'place. "New pattern" makes a new one.')
-        sel = group.children.addSelectionInput(ID_EXISTING, 'Copies', PROMPTS['copies'])
-        self._set_filters(sel, EXISTING_FILTERS)
-        sel.setSelectionLimits(0, 0)
-        sel.tooltip = ('The copies of the chosen pattern, highlighted in the model and the timeline. '
-                       'You can also click any copy of a Formula Pattern here (a feature in its timeline '
-                       'group, a face it created, or a patterned sketch curve) to pick that pattern.')
 
         group = inputs.addGroupCommandInput(ID_REFERENCE_GROUP, 'Formula reference')
         group.isExpanded = False
@@ -590,6 +605,8 @@ class Dialog:
 
     def on_existing_changed(self):
         """The Copies input: a copy clicked picks its pattern; cleared by the user drops the edit."""
+        if self._loading:
+            return                    # our own filling of the input, not a click
         sel = adsk.core.SelectionCommandInput.cast(self._input(ID_EXISTING))
         if sel.selectionCount == 0:
             if self.editing is not None or self.last_error:
@@ -609,21 +626,65 @@ class Dialog:
         """Edit ``record`` (None: make a new pattern). Selects it in the list, loads it into the
         dialog and highlights its copies through the Copies input. Nothing is rebuilt until the
         user changes something (see ``unchanged``)."""
-        self.last_error = None
-        self.editing = None
-        self.dirty = False
-        copies = adsk.core.SelectionCommandInput.cast(self._input(ID_EXISTING))
-        copies.clearSelection()
-        self._select_list_entry(record)
-        if record is None:
+        self._loading = True
+        try:
+            self.last_error = None
+            self.editing = None
+            self.dirty = False
+            self._pending = []
+            self.reselect_needed = False
+            copies = adsk.core.SelectionCommandInput.cast(self._input(ID_EXISTING))
+            status = self._input(ID_EDIT_STATUS)
+            copies.clearSelection()
+            self._select_list_entry(record)
+            copies.isVisible = status.isVisible = record is not None
+            if record is not None:
+                self._pending = self.load_pattern(record)
+                self.editing = record
+            self._focus_objects()
+            self._update_edit_status()
+        finally:
+            self._loading = False
+
+    def _focus_objects(self):
+        try:
+            adsk.core.SelectionCommandInput.cast(self._input(ID_OBJECTS)).hasFocus = True
+        except Exception:
+            pass
+
+    def _complete_pending(self):
+        """Retry the selections Fusion did not take while the pattern was loaded (called from
+        validateInputs, where the API says addSelection is welcome). After a few refusals the
+        user is asked to click them instead."""
+        if not self._pending:
             return
-        self.load_pattern(record)
-        self.editing = record
-        for e in record.highlight:
-            try:
-                copies.addSelection(e)
-            except Exception:
-                pass
+        still = []
+        for input_id, entities, tries in self._pending:
+            missing = self._fill_selection(input_id, entities, clear=False)
+            tries += 1
+            if missing and tries < 3:
+                still.append((input_id, missing, tries))
+            elif missing:
+                self.reselect_needed = True
+        self._pending = still
+        self._focus_objects()
+        self._update_edit_status()
+
+    def _update_edit_status(self):
+        box = adsk.core.TextBoxCommandInput.cast(self._input(ID_EDIT_STATUS))
+        if self.editing is None:
+            box.formattedText = ''
+            return
+        text = f'Editing <b>{self.editing.label}</b>. '
+        if self.reselect_needed and (self.selected_objects().count < 1 or
+                                     (self.reference_entity() is None and not (self.sketch_mode and not self.circular))):
+            text += ('Fusion could not re-select its objects or direction. Click its objects and direction '
+                     'again, then OK replaces it.')
+        elif self.dirty:
+            text += 'OK replaces it with these changes.'
+        else:
+            text += 'Change anything, then OK replaces it. OK now leaves it as it is.'
+        box.formattedText = text
 
     def _select_list_entry(self, record):
         dd = adsk.core.DropDownCommandInput.cast(self._input(ID_PATTERN_LIST))
@@ -642,27 +703,40 @@ class Dialog:
         """A saved pattern is loaded and nothing was changed: leave the model as it is."""
         return self.editing is not None and not self.dirty
 
-    def load_pattern(self, record):
-        """Fill the dialog's inputs from a saved pattern."""
+    def load_pattern(self, record) -> list:
+        """Fill the dialog's inputs from a saved pattern. Returns what Fusion did not select,
+        as (input id, entities, tries) for _complete_pending()."""
         self._apply_settings(record.settings, force_object_type=True)
         self._apply_number_settings(record.settings)
-        self._fill_selection(ID_OBJECTS, record.objects)
-        self._fill_selection(ID_AXIS if self.circular else ID_DIRECTION,
-                             [record.reference] if record.reference is not None else [])
+        design = self.design
+        reference = [record.reference] if record.reference is not None else []
+        pending = []
+        for input_id, entities in ((ID_EXISTING, record.highlight),
+                                   (ID_OBJECTS, record.objects),
+                                   (ID_AXIS if self.circular else ID_DIRECTION, reference)):
+            missing = self._fill_selection(input_id, [_in_root_context(design, e) for e in entities])
+            if missing:
+                pending.append((input_id, missing, 1))
+        return pending
 
-    def _fill_selection(self, input_id, entities):
+    def _fill_selection(self, input_id, entities, clear=True) -> list:
+        """Put ``entities`` into a selection input; returns the ones Fusion did not take."""
         sel = adsk.core.SelectionCommandInput.cast(self._input(input_id))
-        sel.clearSelection()
+        if clear:
+            sel.clearSelection()
+        try:
+            sel.hasFocus = True   # addSelection only lands in the input that has focus (Fusion 2026-11)
+        except Exception:
+            pass
+        missing = []
         for e in entities:
             try:
-                sel.addSelection(e)
+                added = sel.addSelection(e)
             except Exception:
-                pass              # the user re-selects what Fusion would not take back
-
-    def _editing_note(self) -> str:
-        if self.dirty:
-            return f'✎ Editing <b>{self.editing.label}</b>: OK replaces it.'
-        return f'✎ Editing <b>{self.editing.label}</b>: change something, then OK replaces it.'
+                added = False
+            if not added:
+                missing.append(e)
+        return missing
 
     def on_type_changed(self):
         circular = self.circular
@@ -711,25 +785,37 @@ class Dialog:
     def refresh_preview(self):
         preview = adsk.core.TextBoxCommandInput.cast(self._input(ID_PREVIEW))
         formula = adsk.core.StringValueCommandInput.cast(self._input(ID_FORMULA))
+        error = False
         try:
             spec = self.spec()
             result = engine.compute_positions(spec)
             html = engine.preview_html(result, self.length_unit, spec.circular, spec.mode, spec.flip)
             if self.live and spec.count > MAX_MODEL_PREVIEW:
                 html += f'<br><i>Model preview is off above {MAX_MODEL_PREVIEW} copies; the result is built on OK.</i>'
-            if self.editing:
-                html = self._editing_note() + '<br>' + html
             if self.last_error:
                 html = engine.error_html(self.last_error) + '<br>' + html
+                error = True
             formula.isValueError = False
         except engine.FormulaError as e:
             html = engine.error_html(str(e))
             formula.isValueError = True
+            error = True
         except Exception as e:           # never let a preview problem take the dialog down
             html = engine.error_html(f'{type(e).__name__}: {e}')
+            error = True
         preview.formattedText = html
+        if error:
+            try:
+                self._input(ID_PREVIEW_GROUP).isExpanded = True   # the group is closed by default
+            except Exception:
+                pass
+        try:
+            self._update_edit_status()
+        except Exception:
+            pass
 
     def is_valid(self) -> bool:
+        self._complete_pending()
         existing = adsk.core.SelectionCommandInput.cast(self._input(ID_EXISTING))
         if existing.selectionCount and self.editing is None:
             return False          # something that is not a Formula Pattern copy is selected
@@ -1235,8 +1321,8 @@ def _selection_summary(entities, reference, label: str) -> str:
     return '; '.join(parts)
 
 
-def _same_sketch(a, b) -> bool:
-    """Fusion hands out a fresh proxy object for every parentSketch read, so compare by token."""
+def _same_entity(a, b) -> bool:
+    """Fusion hands out a fresh wrapper object for every read, so compare by token."""
     if a is None or b is None:
         return False
     if a is b:
@@ -1248,6 +1334,30 @@ def _same_sketch(a, b) -> bool:
             return a.name == b.name
         except Exception:
             return False
+
+
+_same_sketch = _same_entity
+
+
+def _in_root_context(design, entity):
+    """``entity`` as a selection input wants it: the proxy in the root component's context when
+    it lives in another component, which is what Fusion hands out when the user clicks it. A
+    pattern feature reads its inputs back in its own component's context instead."""
+    try:
+        if entity.assemblyContext is not None:
+            return entity                       # already a proxy
+        component = getattr(entity, 'parentComponent', None)
+        if component is None:
+            component = entity.parentSketch.parentComponent     # sketch entities
+        root = design.rootComponent
+        if component is None or _same_entity(component, root):
+            return entity
+        occurrences = root.allOccurrencesByComponent(component)
+        if occurrences.count == 0:
+            return entity
+        return entity.createForAssemblyContext(occurrences.item(0)) or entity
+    except Exception:
+        return entity
 
 
 # ---------------------------------------------------------------------------

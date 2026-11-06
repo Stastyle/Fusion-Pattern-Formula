@@ -80,10 +80,10 @@ Stop, so no Fusion restart is needed.
 | **Formula** | The rule. See [Writing a formula](#5-writing-a-formula). |
 | **a** | A value for the formula with units: a length for linear patterns, an angle for circular ones. Expressions and units work, e.g. `25.5 in` or `scale / 2`. |
 | **b, c** | Plain numbers for the formula. |
-| **Preview** | Every copy's position (and gap), the farthest copy, and any warnings or errors. Updates as you type. |
+| **Preview** | Every copy's position (and gap), the farthest copy, and any warnings or errors. Updates as you type. Closed by default; opens by itself when there is an error to show. |
 | **Show in model** | Builds the copies while the dialog is open. Switches itself off above 100 copies; the result is still built when you press OK. |
-| **Saved pattern** (under *Edit a saved pattern*) | A list of every pattern made by Formula Pattern in this design. Pick one to load it and highlight its copies; OK then replaces that pattern. *New pattern* makes a new one. See [Editing a saved pattern](#editing-a-saved-pattern). |
-| **Copies** | The copies of the chosen pattern, highlighted. You can also click any copy of a Formula Pattern here to pick that pattern. |
+| **Saved pattern** (in *Edit a saved pattern*, at the top) | A list of every pattern made by Formula Pattern in this design. Pick one to load it and highlight its copies; OK then replaces that pattern. *New pattern* makes a new one. See [Editing a saved pattern](#editing-a-saved-pattern). |
+| **Copies** | Appears once a pattern is picked: its copies, highlighted in the model and the timeline. Clicking any copy of another Formula Pattern here switches to that pattern. |
 | **Formula reference** | A cheat sheet of the variables, functions and constants (collapsed). |
 | **Advanced** | *Compute*: the same Optimized / Identical / Adjust choice as the native pattern. *Timeline group*: the name of the group that holds the copies. Hidden for sketch curves. |
 
@@ -260,15 +260,15 @@ To change the formula, the count, the values or the selections of a pattern
 you made earlier:
 
 1. Run Formula Pattern.
-2. Under **Edit a saved pattern**, open the **Saved pattern** list. It names
-   every pattern in the design by its timeline group and number of copies,
-   for example *Frets (12 copies)*; while you edit a sketch it also lists that
-   sketch's patterns, as *Fretboard sketch pattern (3 copies)*. Pick one.
-3. The dialog fills itself with that pattern's type, objects, direction or
-   axis, copies, preset, formula, `a b c` and flip; its copies are
-   highlighted in the model and the timeline and listed in **Copies**; and
-   the preview says *Editing Frets (12 copies): change something, then OK
-   replaces it*.
+2. At the top of the dialog, under **Edit a saved pattern**, open the
+   **Saved pattern** list. It names every pattern in the design by its
+   timeline group and number of copies, for example *Frets (12 copies)*;
+   while you edit a sketch it also lists that sketch's patterns, as
+   *Fretboard sketch pattern (3 copies)*. Pick one.
+3. The pattern's copies light up in the model and the timeline, the dialog
+   fills itself with its type, objects, direction or axis, copies, preset,
+   formula, `a b c` and flip, and a line under the list says *Editing Frets
+   (12 copies). Change anything, then OK replaces it.*
 4. Change what you want and press OK. The old copies are removed and the new
    ones are built in their place in the timeline, with the same group name,
    so features that come later in the timeline stay later.
@@ -276,12 +276,15 @@ you made earlier:
 Nothing is rebuilt while you have changed nothing: pressing OK right after
 picking a pattern leaves the model exactly as it was.
 
-Instead of the list you can click any copy of a pattern in the **Copies**
-field: a feature in its timeline group, a face that copy created, or a
-patterned sketch curve. That picks its pattern in the list.
+While a pattern is picked you can click any copy of *another* Formula
+Pattern into the **Copies** field (a feature in its timeline group, a face
+that copy created, or a patterned sketch curve) to switch to that pattern.
 
 Pick **New pattern** in the list to make a *new* pattern from the loaded
 values instead of replacing the old one.
+
+If the line under the list says Fusion could not re-select the objects or
+direction, click them again yourself; everything else is loaded.
 
 Two things to know:
 
@@ -328,6 +331,7 @@ are resolved.
 | `Fusion could not create copy 4 of 22 at 110 mm` | Fusion refused that pattern (for example a cut that would leave nothing). | Check the model at that position; try the *Adjust* compute option. |
 | `3 : invalid argument … — direction: …; objects: …` | Fusion's own API rejected an argument; the text after the dash says what was passed. | Report it with the full message. |
 | `This is not a copy made by Formula Pattern` | Something else was clicked into the *Copies* field (a native feature, an unpatterned curve). | Clear the field, pick from the *Saved pattern* list, or click a copy of a Formula Pattern. |
+| *Fusion could not re-select its objects or direction* (under the list) | The pattern loaded, but Fusion refused to put its objects or direction back into the fields. | Click the objects and the direction again; the formula and values are already loaded. |
 | The *Saved pattern* list shows only *New pattern* | No pattern with an id was found in the design. | Patterns made with 1.0.0 are not listed (see below). If a newer pattern is missing, report it. |
 | `This copy was made by an older version …` | The pattern was made by version 1.0.0, which stored no pattern id. | Delete its group and make the pattern again. |
 | `Formula Pattern could not find the saved pattern in the timeline` | The copies being replaced are not in the timeline (dissolved into a base feature, for example). | Delete them by hand and make the pattern again. |

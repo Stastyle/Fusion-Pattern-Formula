@@ -207,6 +207,16 @@ class Timeline(core.Base):
 
 # ---- features ----
 
+def _proxy(entity, occurrence):
+    """``entity`` as seen through ``occurrence``: what Fusion hands out for geometry in a
+    component when the root component is active (createForAssemblyContext)."""
+    p = type(entity).__new__(type(entity))
+    p.__dict__.update(entity.__dict__)
+    p.nativeObject = entity
+    p.assemblyContext = occurrence
+    return p
+
+
 class Feature(core.Base):
     _tokens = 0
 
@@ -220,7 +230,13 @@ class Feature(core.Base):
         self.objectType = 'adsk::fusion::' + type(collection).__name__[:-1]   # RectangularPatternFeature …
         Feature._tokens += 1
         self.entityToken = f'feature/{Feature._tokens}'
+        self.parentComponent = collection._component
+        self.assemblyContext = None
+        self.nativeObject = None
         self._deleted = False
+
+    def createForAssemblyContext(self, occurrence):
+        return _proxy(self, occurrence)
 
     @property
     def inputEntities(self):
@@ -265,8 +281,9 @@ class CircularPatternFeatureInput(core.Base):
 
 
 class _PatternFeatures(core.Base):
-    def __init__(self, timeline):
+    def __init__(self, timeline, component=None):
         self._timeline = timeline
+        self._component = component
         self.created = []
         self.fail_at = None   # test hook: make add() return None for this copy number
         self.reject = None    # test hook: createInput raises "3 : invalid argument <reject>"
@@ -316,16 +333,34 @@ class OtherFeatures(_PatternFeatures):
 
 
 class Features(core.Base):
-    def __init__(self, timeline):
-        self.rectangularPatternFeatures = RectangularPatternFeatures(timeline)
-        self.circularPatternFeatures = CircularPatternFeatures(timeline)
-        self.otherFeatures = OtherFeatures(timeline)
+    def __init__(self, timeline, component=None):
+        self.rectangularPatternFeatures = RectangularPatternFeatures(timeline, component)
+        self.circularPatternFeatures = CircularPatternFeatures(timeline, component)
+        self.otherFeatures = OtherFeatures(timeline, component)
+
+
+class Occurrence(core.Base):
+    def __init__(self, name, component):
+        self.name = name
+        self.component = component
+        self.objectType = 'adsk::fusion::Occurrence'
+        self.assemblyContext = None
+        self.attributes = core.Attributes(self)
 
 
 class Component(core.Base):
     def __init__(self, name, timeline):
         self.name = name
-        self.features = Features(timeline)
+        self.entityToken = 'component/' + name
+        self.features = Features(timeline, self)
+        self._occurrences = []        # on the root: every occurrence in the design
+
+    def allOccurrencesByComponent(self, component):
+        found = core.ObjectCollection.create()
+        for occ in self._occurrences:
+            if occ.component is component:
+                found.add(occ)
+        return found
 
 
 class Design(core.Base):
@@ -344,15 +379,26 @@ class Design(core.Base):
     def findAttributes(self, groupName, attributeName):
         return core.Attributes.find(groupName, attributeName)
 
+    def add_component(self, name, occurrence_name):
+        """Test helper: a child component with one occurrence under the root."""
+        component = Component(name, self.timeline)
+        self.rootComponent._occurrences.append(Occurrence(occurrence_name, component))
+        return component
+
 
 class Entity(core.Base):
-    """Any selectable thing: a body, a feature, an edge …"""
+    """Any selectable thing: a body, a feature, an edge … (``component`` None: in the root)."""
 
-    def __init__(self, name, object_type='BRepEdge'):
+    def __init__(self, name, object_type='BRepEdge', component=None):
         self.name = name
         self.objectType = 'adsk::fusion::' + object_type
+        self.parentComponent = component
         self.assemblyContext = None
+        self.nativeObject = None
         self.attributes = core.Attributes(self)
+
+    def createForAssemblyContext(self, occurrence):
+        return _proxy(self, occurrence)
 
 
 # ---- sketches and sketch pattern constraints ----
@@ -372,11 +418,10 @@ class SketchEntity(core.Base):
 
     def proxy(self, occurrence_name):
         """The same entity as Fusion hands it out when selected inside an occurrence."""
-        p = type(self).__new__(type(self))
-        p.__dict__.update(self.__dict__)
-        p.nativeObject = self
-        p.assemblyContext = Entity(occurrence_name)
-        return p
+        return _proxy(self, Entity(occurrence_name))
+
+    def createForAssemblyContext(self, occurrence):
+        return _proxy(self, occurrence)
 
     def deleteMe(self):
         if self._deleted:
@@ -523,9 +568,10 @@ class GeometricConstraints(core.Base):
 
 
 class Sketch(core.Base):
-    def __init__(self, name='Sketch1'):
+    def __init__(self, name='Sketch1', component=None):
         self.name = name
         self.entityToken = 'sketch/' + name
+        self.parentComponent = component      # None: in the root component
         self.geometricConstraints = GeometricConstraints(self)
         self.deleted = []           # test helper: entities deleted from this sketch
 
