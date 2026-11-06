@@ -636,13 +636,27 @@ class Dialog:
             return
         entity = sel.selection(sel.selectionCount - 1).entity     # the one just clicked
         try:
-            record = find_pattern(self.design, entity)
+            record = find_pattern(self.design, entity, self.patterns)
         except NotAPattern as e:
-            self.editing, self.dirty = None, False
-            self.last_error = str(e)
-            self._select_list_entry(None)
+            self.last_error = str(e)      # say so, keep whatever is being edited
+            self._restore_highlight()
+            return
+        if self.editing is not None and record.id == self.editing.id:
+            self._restore_highlight()     # a copy of the loaded pattern: keep the user's changes
             return
         self.choose_pattern(record)
+
+    def _restore_highlight(self):
+        """Put the Copies input back to the loaded pattern's copies after a click into it."""
+        self._loading = True
+        try:
+            if self.editing is not None:
+                self._fill_selection(ID_EXISTING, self.editing.highlight)
+            else:
+                adsk.core.SelectionCommandInput.cast(self._input(ID_EXISTING)).clearSelection()
+            self._focus_objects()
+        finally:
+            self._loading = False
 
     def choose_pattern(self, record):
         """Edit ``record`` (None: make a new pattern). Selects it in the list, loads it into the
@@ -1152,11 +1166,16 @@ class PatternRecord:
         self.position = position
 
 
-def find_pattern(design, entity) -> PatternRecord:
+def find_pattern(design, entity, known=()) -> PatternRecord:
     """The saved pattern that ``entity`` (a feature, a constraint or a patterned sketch
-    curve) is a copy of. Raises NotAPattern otherwise."""
-    source = _pattern_source(_native(entity))
+    curve) is a copy of. ``known`` are the records already listed, searched first for sketch
+    curves. Raises NotAPattern otherwise."""
+    native = _native(entity)
+    source = _pattern_source(native)
     if source is None:
+        record = _pattern_containing(design, native, known)
+        if record is not None:
+            return record
         raise NotAPattern('This is not a copy made by Formula Pattern')
     pattern_id = _attribute(source, 'pattern')
     if not pattern_id:
@@ -1315,10 +1334,39 @@ def _pattern_source(entity):
         constraints = list(entity.geometricConstraints)   # a sketch curve or point
     except Exception:
         return None
+    _log(f'  constraints of {_describe(entity)}: {[_type_name(c) for c in constraints]}')
     for constraint in constraints:
         if _attribute(constraint, 'copy') is not None:
             return constraint
     return None
+
+
+def _pattern_containing(design, entity, known=()):
+    """The pattern whose copies, or patterned originals, include ``entity``. This is how a
+    clicked sketch curve is recognised: Fusion does not list the pattern constraint among
+    the curve's own geometricConstraints (seen 2026-11-06)."""
+    token = _token(entity)
+    if token is None:
+        return None
+    records = list(known) or list_patterns(design, getattr(entity, 'parentSketch', None))
+    for record in records:
+        members = list(record.highlight)
+        if record.kind == 'sketch':
+            for copy in record.copies:
+                try:
+                    members += list(copy.entities)
+                except Exception:
+                    pass
+        if any(_token(m) == token for m in members):
+            return record
+    return None
+
+
+def _token(entity):
+    try:
+        return entity.entityToken or None
+    except Exception:
+        return None
 
 
 def _attribute(entity, name):

@@ -521,8 +521,10 @@ class PatternConstraint(core.Base):
         kind = 'Circular' if isinstance(pattern_input, CircularPatternConstraintInput) else 'Rectangular'
         self.objectType = f'adsk::fusion::{kind}PatternConstraint'
         self._deleted = False
-        for e in self.entities + copies:
-            e.geometricConstraints.append(self)
+        # Fusion lists the pattern constraint in a copied curve's geometricConstraints (seen
+        # 2026-11-06). The fake leaves that link out on purpose, so the add-in's other way of
+        # recognising a clicked curve, matching entity tokens against the known patterns,
+        # stays covered by the tests.
 
     @property
     def directionOneEntity(self):
@@ -538,9 +540,6 @@ class PatternConstraint(core.Base):
             raise RuntimeError('3 : InternalValidationError : deleted')
         self._deleted = True
         self._constraints.created.remove(self)
-        for e in self.entities + self.createdEntities:
-            if self in e.geometricConstraints:
-                e.geometricConstraints.remove(self)
         return True
 
 

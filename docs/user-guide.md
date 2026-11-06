@@ -279,6 +279,9 @@ picking a pattern leaves the model exactly as it was.
 While a pattern is picked you can click any copy of *another* Formula
 Pattern into the **Copies** field (a feature in its timeline group, a face
 that copy created, or a patterned sketch curve) to switch to that pattern.
+Clicking something else there, the sketch origin point for instance, only
+shows *This is not a copy made by Formula Pattern* and leaves the edit, and
+your changes, as they were.
 
 Pick **New pattern** in the list to make a *new* pattern from the loaded
 values instead of replacing the old one.
@@ -330,7 +333,7 @@ are resolved.
 | `The direction / centre must be in the same sketch as the curves` | The direction line or centre point is in another sketch. | Pick one from the same sketch, or draw a construction line there. |
 | `Fusion could not create copy 4 of 22 at 110 mm` | Fusion refused that pattern (for example a cut that would leave nothing). | Check the model at that position; try the *Adjust* compute option. |
 | `3 : invalid argument … — direction: …; objects: …` | Fusion's own API rejected an argument; the text after the dash says what was passed. | Report it with the full message. |
-| `This is not a copy made by Formula Pattern` | Something else was clicked into the *Copies* field (a native feature, an unpatterned curve). | Clear the field, pick from the *Saved pattern* list, or click a copy of a Formula Pattern. |
+| `This is not a copy made by Formula Pattern` | Something else was clicked into the *Copies* field (a native feature, an unpatterned curve, the sketch origin). | Nothing is lost: the pattern being edited stays loaded. Click a copy of a Formula Pattern, or carry on. |
 | *Fusion could not re-select its objects or direction* (under the list) | The pattern loaded, but Fusion refused to put its objects or direction back into the fields. | Click the objects and the direction again; the formula and values are already loaded. |
 | The *Saved pattern* list shows only *New pattern* | No pattern with an id was found in the design. | Patterns made with 1.0.0 are not listed (see below). If a newer pattern is missing, report it. |
 | `This copy was made by an older version …` | The pattern was made by version 1.0.0, which stored no pattern id. | Delete its group and make the pattern again. |

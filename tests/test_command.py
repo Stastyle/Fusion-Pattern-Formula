@@ -1040,19 +1040,49 @@ class EditingSavedPattern(FusionHarness):
         self.assertEqual(cmd.commandInputs.itemById(C.ID_AXIS).selection(0).entity.name, 'cylinder')
         self.assertTrue(self.validate(cmd))
 
-    def test_a_feature_that_is_not_a_formula_pattern_copy_is_refused(self):
-        self.make_linear(count=3, group='Frets')
+    def test_a_stray_click_into_copies_is_reported_and_the_edit_goes_on(self):
+        feats = self.make_linear(count=3, group='Frets')
         cmd, dialog = self.open_dialog()
         self.pick(cmd, 'Frets (3 copies)')
+        cmd.commandInputs.itemById(C.ID_COUNT).value = 5
+        self.changed(cmd, C.ID_COUNT)
         self.click_copy(cmd, self.design.rootComponent.features.otherFeatures.add('Fillet1'))
-        self.assertFalse(dialog.editing)
-        self.assertFalse(self.validate(cmd), 'OK must stay off until the stray selection is cleared')
+        self.assertTrue(dialog.editing, 'the edit is kept')
+        self.assertTrue(dialog.dirty, 'and so are the changes')
+        self.assertEqual(dialog.count, 5)
         self.assertIn('not a copy made by Formula Pattern', self.preview_text(cmd))
-        self.assertEqual(cmd.commandInputs.itemById(C.ID_PATTERN_LIST).selectedItem.name, 'New pattern')
-        cmd.commandInputs.itemById(C.ID_EXISTING).clearSelection()
-        self.changed(cmd, C.ID_EXISTING)
-        self.assertTrue(self.validate(cmd), 'the loaded objects and direction are still there')
-        self.assertNotIn('not a copy', self.preview_text(cmd))
+        self.assertEqual(self.highlighted(cmd), feats, 'the stray entity is dropped from the highlight')
+        self.assertEqual(cmd.commandInputs.itemById(C.ID_PATTERN_LIST).selectedItem.name, 'Frets (3 copies)')
+        self.assertTrue(self.validate(cmd))
+        self.assertTrue(cmd.commandInputs.itemById(C.ID_OBJECTS).hasFocus)
+
+    def test_clicking_a_copied_curve_of_another_sketch_pattern_switches_to_it(self):
+        sketch = adsk.fusion.Sketch('Sketch1')
+        first, second = sketch.line('first'), sketch.line('second')
+        self.app.activeEditObject = sketch
+        for line in (first, second):
+            cmd, dialog = self.open_dialog()
+            self.select(cmd, C.ID_OBJECTS, line)
+            cmd.commandInputs.itemById(C.ID_COUNT).value = 2
+            self.changed(cmd, C.ID_COUNT)
+            self.assertTrue(self.preview(cmd).isValidResult, self.preview_text(cmd))
+            self.finish(cmd)
+        constraints = sketch.geometricConstraints.created
+        copies_of_second = [e for c in constraints[2:] for e in c.createdEntities]
+
+        cmd, dialog = self.open_dialog()
+        self.assertEqual(self.list_names(cmd),
+                         ['New pattern', 'Sketch1 sketch pattern (2 copies)', 'Sketch1 sketch pattern (2 copies) #2'])
+        self.pick(cmd, 'Sketch1 sketch pattern (2 copies)')
+        self.assertIs(cmd.commandInputs.itemById(C.ID_OBJECTS).selection(0).entity, first)
+        self.click_copy(cmd, copies_of_second[1])
+        self.assertEqual(cmd.commandInputs.itemById(C.ID_PATTERN_LIST).selectedItem.name,
+                         'Sketch1 sketch pattern (2 copies) #2')
+        self.assertIs(cmd.commandInputs.itemById(C.ID_OBJECTS).selection(0).entity, second)
+        self.assertEqual(self.highlighted(cmd), copies_of_second)
+        self.click_copy(cmd, first)                      # the original of the first pattern
+        self.assertEqual(cmd.commandInputs.itemById(C.ID_PATTERN_LIST).selectedItem.name,
+                         'Sketch1 sketch pattern (2 copies)')
 
     def test_a_copy_made_by_an_older_version_says_so(self):
         self.make_linear(count=3, group='Frets')
@@ -1063,8 +1093,8 @@ class EditingSavedPattern(FusionHarness):
         self.assertEqual(self.list_names(cmd), ['New pattern', 'Frets (3 copies)'], 'no id: not listed')
         self.pick(cmd, 'Frets (3 copies)')
         self.click_copy(cmd, old)
-        self.assertFalse(dialog.editing)
         self.assertIn('older version', self.preview_text(cmd))
+        self.assertEqual(dialog.editing.label, 'Frets (3 copies)', 'the edit in progress is kept')
 
     # ---- rebuilding ----
 

@@ -200,6 +200,16 @@ the diagnostics log on; the fake models them this way):
     value, and leftovers are retried from validateInputs. An invisible
     input cannot take focus, so the *Copies* input is shown before it is
     filled.
+15. **A copied sketch curve lists its pattern constraint in
+    `geometricConstraints`** (seen), which `_pattern_source()` uses.
+    `find_pattern()` also matches the clicked entity's `entityToken`
+    against the known patterns' copies and originals
+    (`_pattern_containing()`), so recognition does not hang on that link.
+    The sketch origin point sits where a copy easily lands and is the
+    usual stray click; a stray click keeps the edit in progress and just
+    reports itself (`_restore_highlight()` puts the Copies input back).
+    Sketch editing was exercised end to end: 3 copies to 2, old copies
+    gone, switching patterns by clicking a copy of the other one.
 
 **Diagnostics log.** `command.py` appends what the edit path does to
 `~/.fusion_formula_pattern.log` (emptied when the add-in starts): the

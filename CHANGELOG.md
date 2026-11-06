@@ -12,7 +12,8 @@
   name; sketch patterns are rebuilt without leaving the old copies behind.
   With nothing changed, OK leaves the model alone. *New pattern* makes a
   new one from the loaded values. While a pattern is picked, clicking a
-  copy of another pattern into the *Copies* field switches to it.
+  copy of another pattern into the *Copies* field switches to it; a click
+  on anything else there is reported and leaves the edit as it was.
 * The Preview group starts closed and opens by itself when there is an
   error to show.
 * While editing, the add-in writes what it does to
