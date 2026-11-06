@@ -18,6 +18,7 @@ import math
 import os
 import re
 import traceback
+import uuid
 
 import adsk.core
 import adsk.fusion
@@ -81,6 +82,8 @@ ID_REFERENCE = 'fpReference'
 ID_ADVANCED_GROUP = 'fpAdvancedGroup'
 ID_COMPUTE = 'fpCompute'
 ID_GROUP_NAME = 'fpGroupName'
+ID_EDIT_GROUP = 'fpEditGroup'
+ID_EXISTING = 'fpExisting'
 
 OBJECT_SKETCH = 'Sketch curves'
 OBJECT_TYPES = (
@@ -97,6 +100,9 @@ AXIS_FILTERS = ('LinearEdges', 'ConstructionLines', 'SketchLines', 'CircularEdge
 # the sketch X axis) and a point / circle centre for the centre of a circular pattern.
 SKETCH_DIRECTION_FILTERS = ('SketchLines',)
 SKETCH_AXIS_FILTERS = ('SketchPoints', 'SketchCircles')
+# A saved pattern is picked through any of its copies: a pattern feature (clicked in the
+# timeline, or through a face it made) or a patterned sketch curve / point.
+EXISTING_FILTERS = ('Features', 'SketchCurves', 'SketchPoints')
 PROMPTS = {
     'objects': 'Select the objects to pattern',
     'objects_sketch': 'Select the sketch curves or points to pattern',
@@ -104,6 +110,7 @@ PROMPTS = {
     'direction_sketch': 'Select a sketch line, or leave empty to use the sketch X axis',
     'axis': 'Select an axis: edge, circle, cylindrical face, sketch line or construction axis',
     'axis_sketch': 'Select the centre: a sketch point or a circle',
+    'existing': 'Click any copy of a saved Formula Pattern to load and change it',
 }
 # Internal-unit values the value inputs are created with (see Dialog._number).
 NUMBER_DEFAULTS = {ID_A_LEN: 1.0, ID_A_ANG: math.radians(15.0), ID_B: 0.0, ID_C: 0.0}
@@ -241,6 +248,7 @@ class Dialog:
         self.active_sketch = self._active_sketch()
         self.preset_ids = []          # id of each row of the preset drop-down, in order
         self.last_error = None
+        self.editing = None           # PatternRecord of the saved pattern being edited, if any
         self.saved = load_settings()
         self._build()
         self._apply_settings(self.saved)
@@ -333,6 +341,16 @@ class Dialog:
         preview.isFullWidth = True
         live = group.children.addBoolValueInput(ID_LIVE, 'Show in model', True, '', True)
         live.tooltip = f'Build the copies while the dialog is open. Turned off automatically above {MAX_MODEL_PREVIEW} copies.'
+
+        group = inputs.addGroupCommandInput(ID_EDIT_GROUP, 'Edit a saved pattern')
+        group.isExpanded = True
+        sel = group.children.addSelectionInput(ID_EXISTING, 'Saved pattern', PROMPTS['existing'])
+        self._set_filters(sel, EXISTING_FILTERS)
+        sel.setSelectionLimits(0, 1)
+        sel.tooltip = ('Click any copy of a pattern made by Formula Pattern: a feature in its timeline group '
+                       '(or a face it created), or a patterned sketch curve. The dialog loads that pattern\'s '
+                       'formula, values, objects and direction, and OK replaces it in place. '
+                       'Clear this to make a new pattern instead.')
 
         group = inputs.addGroupCommandInput(ID_REFERENCE_GROUP, 'Formula reference')
         group.isExpanded = False
@@ -535,10 +553,51 @@ class Dialog:
             self._switch_to_custom_if_edited()
         elif cid == ID_MODE:
             self._switch_to_custom_if_edited()
+        elif cid == ID_EXISTING:
+            self.on_existing_changed()
         elif cid not in (ID_COUNT, ID_A_LEN, ID_A_ANG, ID_B, ID_C, ID_FLIP, ID_LIVE,
                          ID_OBJECTS, ID_DIRECTION, ID_AXIS):
             return
         self.refresh_preview()
+
+    def on_existing_changed(self):
+        """The "Saved pattern" selection: load the pattern it belongs to, or say why not."""
+        sel = adsk.core.SelectionCommandInput.cast(self._input(ID_EXISTING))
+        self.last_error = None
+        self.editing = None
+        if sel.selectionCount == 0:
+            return
+        try:
+            record = find_pattern(self.design, sel.selection(0).entity)
+        except NotAPattern as e:
+            self.last_error = str(e)
+            return
+        self.load_pattern(record)
+
+    def load_pattern(self, record):
+        """Fill the dialog from a saved pattern; OK will then replace it (see build())."""
+        self._apply_settings(record.settings, force_object_type=True)
+        self._apply_number_settings(record.settings)
+        self._fill_selection(ID_OBJECTS, record.objects)
+        self._fill_selection(ID_AXIS if self.circular else ID_DIRECTION,
+                             [record.reference] if record.reference is not None else [])
+        self.editing = record
+
+    def _fill_selection(self, input_id, entities):
+        sel = adsk.core.SelectionCommandInput.cast(self._input(input_id))
+        sel.clearSelection()
+        for e in entities:
+            try:
+                sel.addSelection(e)
+            except Exception:
+                pass              # the user re-selects what Fusion would not take back
+
+    def _editing_note(self) -> str:
+        record = self.editing
+        n = len(record.copies)
+        what = 'sketch pattern' if record.kind == 'sketch' else \
+            f'“{record.settings.get("group_name") or DEFAULT_GROUP_NAME}”'
+        return f'✎ Editing <b>{what}</b> ({n} {"copy" if n == 1 else "copies"}): OK replaces it.'
 
     def on_type_changed(self):
         circular = self.circular
@@ -593,6 +652,8 @@ class Dialog:
             html = engine.preview_html(result, self.length_unit, spec.circular, spec.mode, spec.flip)
             if self.live and spec.count > MAX_MODEL_PREVIEW:
                 html += f'<br><i>Model preview is off above {MAX_MODEL_PREVIEW} copies; the result is built on OK.</i>'
+            if self.editing:
+                html = self._editing_note() + '<br>' + html
             if self.last_error:
                 html = engine.error_html(self.last_error) + '<br>' + html
             formula.isValueError = False
@@ -604,6 +665,9 @@ class Dialog:
         preview.formattedText = html
 
     def is_valid(self) -> bool:
+        existing = adsk.core.SelectionCommandInput.cast(self._input(ID_EXISTING))
+        if existing.selectionCount and self.editing is None:
+            return False          # something that is not a Formula Pattern copy is selected
         if self.selected_objects().count < 1:
             return False
         if self.reference_entity() is None and not (self.sketch_mode and not self.circular):
@@ -625,13 +689,19 @@ class Dialog:
         reference = self.reference_entity()
         if entities.count < 1:
             raise RuntimeError('Select the objects to pattern first')
+        if self.sketch_mode:
+            if spec.circular and reference is None:
+                raise RuntimeError('Select the centre point of the pattern first')
+        elif reference is None:
+            raise RuntimeError('Select the objects and a direction (or axis) first')
+        # Every copy carries the pattern's id so the pattern can be found again from any copy.
+        # An edited pattern keeps its id; a new one gets its own.
+        self._pattern_id = self.editing.id if self.editing else uuid.uuid4().hex
         try:
+            if self.editing:
+                self._remove_existing(self.editing)
             if self.sketch_mode:
-                if spec.circular and reference is None:
-                    raise RuntimeError('Select the centre point of the pattern first')
                 return self._build_sketch(spec, result, entities, reference)
-            if reference is None:
-                raise RuntimeError('Select the objects and a direction (or axis) first')
             return self._build_features(spec, result, entities, reference)
         except RuntimeError as e:
             if _FUSION_ERROR.match(str(e)):
@@ -639,6 +709,41 @@ class Dialog:
                 label = 'axis' if spec.circular else 'direction'
                 raise RuntimeError(f'{e} — {_selection_summary(entities, reference, label)}') from e
             raise
+
+    def _remove_existing(self, record):
+        """Delete the copies of the pattern being edited.
+
+        Features are deleted with the timeline rolled back to where they were, so the rebuilt
+        ones (created at the marker) take the same place and anything after them stays after
+        them; _build_features() puts the marker back afterwards. A sketch pattern constraint
+        leaves its copied geometry behind when deleted, so the copies are deleted as well.
+        """
+        if record.kind == 'sketch':
+            for constraint in record.copies:
+                try:
+                    copies = list(constraint.createdEntities)
+                except Exception:
+                    copies = []
+                constraint.deleteMe()
+                for e in copies:
+                    try:
+                        e.deleteMe()
+                    except Exception:
+                        pass
+            return
+        timeline = self.design.timeline
+        self._marker_before = timeline.markerPosition
+        self._marker_was_at_end = timeline.markerPosition >= timeline.count
+        timeline.markerPosition = min(_timeline_index(f) for f in record.copies)
+        for feature in record.copies:
+            feature.deleteMe()
+
+    def _restore_marker(self):
+        timeline = self.design.timeline
+        if self._marker_was_at_end:
+            timeline.moveToEnd()
+        else:
+            timeline.markerPosition = min(self._marker_before, timeline.count)
 
     def _build_features(self, spec, result, entities, reference):
         component = self.design.activeComponent
@@ -673,6 +778,7 @@ class Dialog:
                 feature.name = f'{group_name} {k}/{n}'
                 feature.attributes.add(ATTRIBUTE_GROUP, 'settings', settings_json)
                 feature.attributes.add(ATTRIBUTE_GROUP, 'copy', str(k))
+                feature.attributes.add(ATTRIBUTE_GROUP, 'pattern', self._pattern_id)
             except Exception:
                 pass
             created.append(feature)
@@ -684,6 +790,8 @@ class Dialog:
                 group.name = group_name
             except Exception:
                 pass
+        if self.editing:
+            self._restore_marker()
         return created
 
     def _build_sketch(self, spec, result, entities, reference):
@@ -740,6 +848,7 @@ class Dialog:
             try:
                 pattern.attributes.add(ATTRIBUTE_GROUP, 'settings', settings_json)
                 pattern.attributes.add(ATTRIBUTE_GROUP, 'copy', str(k))
+                pattern.attributes.add(ATTRIBUTE_GROUP, 'pattern', self._pattern_id)
             except Exception:
                 pass
             created.append(pattern)
@@ -769,7 +878,7 @@ class Dialog:
             'group_name': self.group_name,
         }
 
-    def _apply_settings(self, s: dict):
+    def _apply_settings(self, s: dict, force_object_type: bool = False):
         if not s:
             return
 
@@ -785,12 +894,13 @@ class Dialog:
                 dd.listItems.item(index).isSelected = True
 
         circular = s.get('pattern_type') == 'circular'
-        if circular:
-            do(lambda: select(ID_TYPE, 1))
+        if circular != self.circular:
+            do(lambda: select(ID_TYPE, 1 if circular else 0))
             do(self.on_type_changed)
         names = [name for name, _ in OBJECT_TYPES]
-        # While a sketch is being edited, sketch curves are what the user is after.
-        if s.get('object_type') in names and not self.active_sketch:
+        # While a sketch is being edited, sketch curves are what the user is after (unless the
+        # settings come from a saved pattern, which knows what it patterned).
+        if s.get('object_type') in names and (force_object_type or not self.active_sketch):
             do(lambda: select(ID_OBJECT_TYPE, names.index(s['object_type'])))
             do(self.on_object_type_changed)
         do(lambda: setattr(adsk.core.IntegerSpinnerCommandInput.cast(self._input(ID_COUNT)), 'value', int(s['count'])))
@@ -816,6 +926,112 @@ class Dialog:
 
 
 _FUSION_ERROR = re.compile(r'^\d+ : ')   # how Fusion's API phrases its own errors
+
+
+# ---------------------------------------------------------------------------
+# Finding a saved pattern again
+# ---------------------------------------------------------------------------
+
+class NotAPattern(ValueError):
+    """The selected entity is not a copy made by Formula Pattern; the message says why."""
+
+
+class PatternRecord:
+    """A saved pattern, found from one of its copies.
+
+    ``copies`` are the pattern features (kind 'features') or sketch pattern constraints
+    (kind 'sketch') that make it up; ``objects`` and ``reference`` are what it patterned
+    and along / around what.
+    """
+
+    def __init__(self, pattern_id, settings, copies, kind, objects, reference):
+        self.id = pattern_id
+        self.settings = settings
+        self.copies = copies
+        self.kind = kind
+        self.objects = objects
+        self.reference = reference
+
+
+def find_pattern(design, entity) -> PatternRecord:
+    """The saved pattern that ``entity`` (a feature, a constraint or a patterned sketch
+    curve) is a copy of. Raises NotAPattern otherwise."""
+    source = _pattern_source(_native(entity))
+    if source is None:
+        raise NotAPattern('This is not a copy made by Formula Pattern')
+    pattern_id = _attribute(source, 'pattern')
+    if not pattern_id:
+        raise NotAPattern('This copy was made by an older version of Formula Pattern and cannot be '
+                          'loaded; delete its group and create the pattern again')
+    try:
+        settings = json.loads(_attribute(source, 'settings') or '{}')
+    except ValueError:
+        settings = {}
+    if not isinstance(settings, dict):
+        settings = {}
+    copies = [a.parent for a in design.findAttributes(ATTRIBUTE_GROUP, 'pattern')
+              if a.value == pattern_id and a.parent is not None]
+    if not copies:
+        copies = [source]
+    copies.sort(key=_copy_number)
+    kind = 'sketch' if _type_name(source).endswith('Constraint') else 'features'
+    circular = _type_name(source).startswith('Circular')
+    first = copies[0]
+    objects, reference = [], None
+    try:
+        if kind == 'sketch':
+            objects = list(first.entities)
+            reference = first.centerPoint if circular else first.directionOneEntity
+        else:
+            inputs = first.inputEntities
+            objects = [inputs.item(k) for k in range(inputs.count)]
+            reference = first.axis if circular else first.directionOneEntity
+    except Exception:
+        pass                      # the user re-selects what could not be read back
+    return PatternRecord(pattern_id, settings, copies, kind, objects, reference)
+
+
+def _pattern_source(entity):
+    """The pattern feature / constraint ``entity`` is or belongs to, else None."""
+    if _attribute(entity, 'copy') is not None:
+        return entity
+    try:
+        constraints = list(entity.geometricConstraints)   # a sketch curve or point
+    except Exception:
+        return None
+    for constraint in constraints:
+        if _attribute(constraint, 'copy') is not None:
+            return constraint
+    return None
+
+
+def _attribute(entity, name):
+    try:
+        attribute = entity.attributes.itemByName(ATTRIBUTE_GROUP, name)
+    except Exception:
+        return None
+    return attribute.value if attribute is not None else None
+
+
+def _copy_number(entity) -> int:
+    try:
+        return int(_attribute(entity, 'copy') or 0)
+    except ValueError:
+        return 0
+
+
+def _timeline_index(feature) -> int:
+    """Where a feature sits in the timeline. A feature inside a collapsed group reports -1;
+    the group's own index is the position then."""
+    tl = feature.timelineObject
+    index = tl.index
+    if index < 0:
+        group = tl.parentGroup
+        if group is not None:
+            index = group.index
+    if index < 0:
+        raise RuntimeError('Formula Pattern could not find the saved pattern in the timeline')
+    return index
 
 
 def _native(entity):

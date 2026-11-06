@@ -82,6 +82,7 @@ Stop, so no Fusion restart is needed.
 | **b, c** | Plain numbers for the formula. |
 | **Preview** | Every copy's position (and gap), the farthest copy, and any warnings or errors. Updates as you type. |
 | **Show in model** | Builds the copies while the dialog is open. Switches itself off above 100 copies; the result is still built when you press OK. |
+| **Saved pattern** (under *Edit a saved pattern*) | Click any copy of a pattern made earlier by Formula Pattern to load it; OK then replaces that pattern. See [Editing a saved pattern](#editing-a-saved-pattern). |
 | **Formula reference** | A cheat sheet of the variables, functions and constants (collapsed). |
 | **Advanced** | *Compute*: the same Optimized / Identical / Adjust choice as the native pattern. *Timeline group*: the name of the group that holds the copies. Hidden for sketch curves. |
 
@@ -240,7 +241,7 @@ A timeline group (default name *Formula Pattern*, change it under
 Pattern with quantity 2 and the computed extent, so afterwards you can edit,
 suppress or delete individual copies, and every distance is an editable
 parameter. The settings used are stored as attributes on each feature
-(group `FormulaPattern`, names `settings` and `copy`).
+(group `FormulaPattern`, names `settings`, `copy` and `pattern`).
 
 Features are created in the active component, like the native command.
 
@@ -251,6 +252,38 @@ selected curves, with quantity 2 and the computed extent. Copies follow the
 original curves when you edit them, and each copy's distance is a dimension
 you can change. Sketch patterns are not timeline items, so there is no
 group.
+
+### Editing a saved pattern
+
+To change the formula, the count, the values or the selections of a pattern
+you made earlier:
+
+1. Run Formula Pattern.
+2. Under **Edit a saved pattern**, click the **Saved pattern** field, then
+   click any copy of the pattern: a feature in its timeline group (or a face
+   that copy created), or, in a sketch, any patterned curve.
+3. The dialog fills itself with that pattern's type, objects, direction or
+   axis, copies, preset, formula, `a b c` and flip, and the preview says
+   *Editing "Frets" (12 copies): OK replaces it*.
+4. Change what you want and press OK. The old copies are removed and the new
+   ones are built in their place in the timeline, with the same group name,
+   so features that come later in the timeline stay later.
+
+Clear the **Saved pattern** field to make a *new* pattern from the loaded
+values instead of replacing the old one.
+
+Two things to know:
+
+* Later features that reference faces of the old copies (a fillet on a
+  patterned slot, say) lose those references when the copies are replaced,
+  exactly as if you had deleted the group and run the command again. Fusion
+  reports them as errors in the timeline; re-select the faces.
+* Patterns made with version 1.0.0 carry no pattern id and cannot be loaded;
+  the message says so. Delete the group and make the pattern again.
+
+To change only one copy, you do not need the dialog: double-click that
+copy's feature in the timeline group (or the copy's dimension in a sketch)
+and edit it like any native pattern.
 
 ---
 
@@ -283,6 +316,9 @@ are resolved.
 | `The direction / centre must be in the same sketch as the curves` | The direction line or centre point is in another sketch. | Pick one from the same sketch, or draw a construction line there. |
 | `Fusion could not create copy 4 of 22 at 110 mm` | Fusion refused that pattern (for example a cut that would leave nothing). | Check the model at that position; try the *Adjust* compute option. |
 | `3 : invalid argument … — direction: …; objects: …` | Fusion's own API rejected an argument; the text after the dash says what was passed. | Report it with the full message. |
+| `This is not a copy made by Formula Pattern` | The *Saved pattern* field holds something else (a native feature, an unpatterned curve). | Clear the field, or click a copy of a Formula Pattern. |
+| `This copy was made by an older version …` | The pattern was made by version 1.0.0, which stored no pattern id. | Delete its group and make the pattern again. |
+| `Formula Pattern could not find the saved pattern in the timeline` | The copies being replaced are not in the timeline (dissolved into a base feature, for example). | Delete them by hand and make the pattern again. |
 | Model preview is off above 100 copies | Just information. | OK still builds the result. |
 
 Start-up problems show a message box:
@@ -300,6 +336,7 @@ Start-up problems show a message box:
 * One direction per pattern. For a grid, run the command twice.
 * Construction geometry (planes, axes, points) cannot be patterned.
 * The result is parametric per copy, but not linked to the formula: changing
-  `a` or a user parameter later means running the command again.
+  `a` or a user parameter later means loading the pattern through *Saved
+  pattern* and pressing OK again.
 * Sketch patterns need a sketch line as direction (or none for the X axis);
   model edges cannot drive them.

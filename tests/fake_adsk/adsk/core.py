@@ -602,17 +602,25 @@ class ObjectCollection(Base):
 
 
 class Attribute(Base):
-    def __init__(self, groupName, name, value):
+    def __init__(self, groupName, name, value, parent=None):
         self.groupName, self.name, self.value = groupName, name, value
+        self.parent = parent
 
 
 class Attributes(Base):
-    def __init__(self):
+    """Attributes of one entity. Every attribute added anywhere is also recorded in a
+    registry so Design.findAttributes() can find it, as in Fusion. Deleted entities carry
+    ``_deleted = True`` and drop out of the search."""
+    _registry = []
+
+    def __init__(self, parent=None):
+        self._parent = parent
         self._items = []
 
     def add(self, groupName, name, value):
-        a = Attribute(groupName, name, value)
+        a = Attribute(groupName, name, value, self._parent)
         self._items.append(a)
+        Attributes._registry.append(a)
         return a
 
     def itemByName(self, groupName, name):
@@ -621,6 +629,11 @@ class Attributes(Base):
     @property
     def count(self):
         return len(self._items)
+
+    @classmethod
+    def find(cls, groupName, name):
+        return [a for a in cls._registry
+                if a.groupName == groupName and a.name == name and not getattr(a.parent, '_deleted', False)]
 
 
 class Application(Base):
@@ -640,3 +653,4 @@ class Application(Base):
     @classmethod
     def reset(cls):
         cls._instance = None
+        Attributes._registry = []

@@ -743,5 +743,234 @@ class SketchMode(FusionHarness):
         self.assertEqual(self.saved[0]['object_type'], 'Sketch curves')
 
 
+class EditingSavedPattern(FusionHarness):
+    """Click any copy of a saved Formula Pattern in the "Saved pattern" input: the dialog loads
+    its formula, values, objects and direction, and OK replaces the pattern in place."""
+
+    def finish(self, cmd):
+        cmd.destroy.fire(adsk.core.CommandEventArgs(cmd, adsk.core.CommandTerminationReason.CompletedTerminationReason))
+
+    def make_linear(self, count=3, group='Frets', preset='Guitar frets (12-TET)'):
+        cmd, dialog = self.open_dialog()
+        self.ready_linear(cmd)
+        self.choose(cmd, C.ID_PRESET, preset)
+        cmd.commandInputs.itemById(C.ID_COUNT).value = count
+        self.changed(cmd, C.ID_COUNT)
+        self.set_text(cmd, C.ID_GROUP_NAME, group)
+        args = self.preview(cmd)
+        self.assertTrue(args.isValidResult, self.preview_text(cmd))
+        self.finish(cmd)
+        return list(self.design.rootComponent.features.rectangularPatternFeatures.created)
+
+    def load(self, cmd, entity):
+        self.select(cmd, C.ID_EXISTING, entity)
+
+    # ---- loading ----
+
+    def test_every_copy_carries_the_pattern_id_the_edit_path_looks_for(self):
+        feats = self.make_linear()
+        ids = {f.attributes.itemByName('FormulaPattern', 'pattern').value for f in feats}
+        self.assertEqual(len(ids), 1)
+        self.assertTrue(next(iter(ids)))
+
+    def test_picking_a_copy_loads_its_settings_objects_and_direction(self):
+        feats = self.make_linear(count=4, group='Frets')
+        cmd, dialog = self.open_dialog()
+        self.choose(cmd, C.ID_TYPE, 'Circular')          # the dialog must switch back to linear
+        self.load(cmd, feats[2])
+        self.assertFalse(dialog.circular)
+        self.assertEqual(dialog.object_type, 'Bodies')
+        self.assertEqual(dialog.preset_id, 'frets')
+        self.assertEqual(dialog.count, 4)
+        self.assertEqual(dialog.group_name, 'Frets')
+        objects = cmd.commandInputs.itemById(C.ID_OBJECTS)
+        self.assertEqual([objects.selection(k).entity.name for k in range(objects.selectionCount)], ['slot'])
+        direction = cmd.commandInputs.itemById(C.ID_DIRECTION)
+        self.assertEqual(direction.selection(0).entity.name, 'neck edge')
+        self.assertTrue(dialog.editing)
+        self.assertIn('Editing', self.preview_text(cmd))
+        self.assertIn('Frets', self.preview_text(cmd))
+        self.assertTrue(self.validate(cmd))
+
+    def test_loading_a_circular_pattern_switches_the_type_and_fills_the_axis(self):
+        cmd, dialog = self.open_dialog()
+        self.choose(cmd, C.ID_TYPE, 'Circular')
+        self.select(cmd, C.ID_OBJECTS, 'rib')
+        self.select(cmd, C.ID_AXIS, 'cylinder')
+        self.choose(cmd, C.ID_PRESET, 'Golden angle (phyllotaxis)')
+        self.preview(cmd)
+        self.finish(cmd)
+        copy = self.design.rootComponent.features.circularPatternFeatures.item(1)
+
+        cmd, dialog = self.open_dialog()
+        self.load(cmd, copy)
+        self.assertTrue(dialog.circular)
+        self.assertEqual(dialog.preset_id, 'golden_angle')
+        self.assertEqual(cmd.commandInputs.itemById(C.ID_OBJECTS).selection(0).entity.name, 'rib')
+        self.assertEqual(cmd.commandInputs.itemById(C.ID_AXIS).selection(0).entity.name, 'cylinder')
+        self.assertTrue(self.validate(cmd))
+
+    def test_a_feature_that_is_not_a_formula_pattern_copy_is_refused(self):
+        cmd, dialog = self.open_dialog()
+        self.ready_linear(cmd)
+        self.load(cmd, self.design.rootComponent.features.otherFeatures.add('Fillet1'))
+        self.assertFalse(dialog.editing)
+        self.assertFalse(self.validate(cmd), 'OK must stay off until the stray selection is cleared')
+        self.assertIn('not a copy made by Formula Pattern', self.preview_text(cmd))
+        cmd.commandInputs.itemById(C.ID_EXISTING).clearSelection()
+        self.changed(cmd, C.ID_EXISTING)
+        self.assertTrue(self.validate(cmd))
+        self.assertNotIn('not a copy', self.preview_text(cmd))
+
+    def test_a_copy_made_by_an_older_version_says_so(self):
+        old = self.design.rootComponent.features.otherFeatures.add('Formula Pattern 1/3')
+        old.attributes.add('FormulaPattern', 'settings', '{}')
+        old.attributes.add('FormulaPattern', 'copy', '1')
+        cmd, dialog = self.open_dialog()
+        self.load(cmd, old)
+        self.assertFalse(dialog.editing)
+        self.assertIn('older version', self.preview_text(cmd))
+
+    # ---- rebuilding ----
+
+    def test_ok_replaces_the_pattern_in_place_with_the_new_count(self):
+        other = self.design.rootComponent.features.otherFeatures
+        other.add('Base extrude')
+        old = self.make_linear(count=3, group='Frets')
+        other.add('Fillet1')
+        timeline = self.design.timeline
+        self.assertEqual(timeline.names(), ['Base extrude', ['Frets 1/3', 'Frets 2/3', 'Frets 3/3'], 'Fillet1'])
+        old_id = old[0].attributes.itemByName('FormulaPattern', 'pattern').value
+
+        cmd, dialog = self.open_dialog()
+        self.load(cmd, old[1])
+        cmd.commandInputs.itemById(C.ID_COUNT).value = 5
+        self.changed(cmd, C.ID_COUNT)
+        args = self.preview(cmd)
+        self.assertTrue(args.isValidResult, self.preview_text(cmd))
+
+        feats = self.design.rootComponent.features.rectangularPatternFeatures
+        self.assertEqual([f.name for f in feats.created], [f'Frets {k}/5' for k in range(1, 6)])
+        self.assertTrue(all(f._deleted for f in old), 'the old copies are gone')
+        self.assertEqual(timeline.names(), ['Base extrude', [f'Frets {k}/5' for k in range(1, 6)], 'Fillet1'])
+        self.assertEqual(timeline.markerPosition, timeline.count, 'marker back at the end')
+        self.assertEqual(timeline.timelineGroups.count, 1)
+        self.assertEqual(timeline.timelineGroups.item(0).name, 'Frets')
+        new = feats.item(0).attributes
+        self.assertEqual(new.itemByName('FormulaPattern', 'pattern').value, old_id, 'same pattern, edited')
+        self.assertEqual(json.loads(new.itemByName('FormulaPattern', 'settings').value)['count'], 5)
+
+    def test_a_marker_the_user_rolled_back_stays_where_it_was(self):
+        other = self.design.rootComponent.features.otherFeatures
+        other.add('Base extrude')
+        old = self.make_linear(count=3)
+        other.add('Fillet1')
+        timeline = self.design.timeline
+        timeline.markerPosition = 2            # before Fillet1
+        cmd, dialog = self.open_dialog()
+        self.load(cmd, old[0])
+        cmd.commandInputs.itemById(C.ID_COUNT).value = 2
+        self.changed(cmd, C.ID_COUNT)
+        self.assertTrue(self.preview(cmd).isValidResult, self.preview_text(cmd))
+        self.assertEqual(timeline.markerPosition, 2)
+        self.assertEqual(timeline.names()[-1], 'Fillet1')
+
+    def test_a_single_copy_pattern_outside_any_group_is_replaced_too(self):
+        old = self.make_linear(count=1)
+        self.assertEqual(self.design.timeline.timelineGroups.count, 0)
+        cmd, dialog = self.open_dialog()
+        self.load(cmd, old[0])
+        cmd.commandInputs.itemById(C.ID_COUNT).value = 3
+        self.changed(cmd, C.ID_COUNT)
+        self.assertTrue(self.preview(cmd).isValidResult, self.preview_text(cmd))
+        feats = self.design.rootComponent.features.rectangularPatternFeatures
+        self.assertEqual(feats.count, 3)
+        self.assertTrue(old[0]._deleted)
+
+    def test_clearing_the_saved_pattern_makes_a_new_pattern_next_to_the_old_one(self):
+        old = self.make_linear(count=3)
+        cmd, dialog = self.open_dialog()
+        self.load(cmd, old[0])
+        cmd.commandInputs.itemById(C.ID_EXISTING).clearSelection()
+        self.changed(cmd, C.ID_EXISTING)
+        self.assertFalse(dialog.editing)
+        self.assertTrue(self.preview(cmd).isValidResult, self.preview_text(cmd))
+        feats = self.design.rootComponent.features.rectangularPatternFeatures
+        self.assertEqual(feats.count, 6)
+        self.assertFalse(any(f._deleted for f in old))
+        self.assertEqual(self.design.timeline.timelineGroups.count, 2)
+        ids = {f.attributes.itemByName('FormulaPattern', 'pattern').value for f in feats.created}
+        self.assertEqual(len(ids), 2, 'a new pattern gets its own id')
+
+    def test_a_formula_error_while_editing_leaves_the_old_pattern_alone(self):
+        old = self.make_linear(count=3)
+        cmd, dialog = self.open_dialog()
+        self.load(cmd, old[0])
+        self.set_text(cmd, C.ID_FORMULA, 'a * (')
+        self.assertFalse(self.preview(cmd).isValidResult)
+        self.assertFalse(any(f._deleted for f in old))
+        cmd.execute.fire(adsk.core.CommandEventArgs(cmd))
+        self.assertFalse(any(f._deleted for f in old))
+
+    def test_sketch_pattern_is_loaded_from_a_copied_curve_and_rebuilt_without_orphans(self):
+        sketch = adsk.fusion.Sketch('Fretboard')
+        fret, axis_line = sketch.line('fret slot'), sketch.line('centre line')
+        self.app.activeEditObject = sketch
+        cmd, dialog = self.open_dialog()
+        self.select(cmd, C.ID_OBJECTS, fret)
+        self.select(cmd, C.ID_DIRECTION, axis_line)
+        self.choose(cmd, C.ID_PRESET, 'Guitar frets (12-TET)')
+        cmd.commandInputs.itemById(C.ID_COUNT).value = 3
+        self.changed(cmd, C.ID_COUNT)
+        self.assertTrue(self.preview(cmd).isValidResult, self.preview_text(cmd))
+        self.finish(cmd)
+        old = list(sketch.geometricConstraints.created)
+        old_copies = [e for c in old for e in c.createdEntities]
+        self.assertEqual(len(old_copies), 3)
+
+        cmd, dialog = self.open_dialog()
+        self.load(cmd, old_copies[1])                 # the user clicks the second copy
+        self.assertTrue(dialog.editing)
+        self.assertEqual(dialog.object_type, 'Sketch curves')
+        self.assertEqual(dialog.preset_id, 'frets')
+        self.assertEqual(dialog.count, 3)
+        self.assertIs(cmd.commandInputs.itemById(C.ID_OBJECTS).selection(0).entity, fret)
+        self.assertIs(cmd.commandInputs.itemById(C.ID_DIRECTION).selection(0).entity, axis_line)
+
+        cmd.commandInputs.itemById(C.ID_COUNT).value = 2
+        self.changed(cmd, C.ID_COUNT)
+        self.assertTrue(self.preview(cmd).isValidResult, self.preview_text(cmd))
+        made = sketch.geometricConstraints.created
+        self.assertEqual(len(made), 2)
+        self.assertTrue(all(c._deleted for c in old))
+        self.assertEqual(sketch.deleted, old_copies, 'the old copies are deleted, not left behind')
+        self.assertFalse(fret._deleted)
+        self.assertEqual(made[0].input.entities, [fret])
+        self.assertIs(made[0].input.directionOneEntity, axis_line)
+
+    def test_circular_sketch_pattern_loads_its_centre_point(self):
+        sketch = adsk.fusion.Sketch('Wheel')
+        spoke, hub = sketch.line('spoke'), sketch.point('hub')
+        self.app.activeEditObject = sketch
+        cmd, dialog = self.open_dialog()
+        self.choose(cmd, C.ID_TYPE, 'Circular')
+        self.select(cmd, C.ID_OBJECTS, spoke)
+        self.select(cmd, C.ID_AXIS, hub)
+        self.assertTrue(self.preview(cmd).isValidResult, self.preview_text(cmd))
+        self.finish(cmd)
+        cmd, dialog = self.open_dialog()
+        self.load(cmd, spoke)                          # the original carries the constraints too
+        self.assertTrue(dialog.editing)
+        self.assertTrue(dialog.circular)
+        self.assertIs(cmd.commandInputs.itemById(C.ID_AXIS).selection(0).entity, hub)
+
+    def test_the_saved_pattern_input_accepts_features_and_sketch_curves(self):
+        cmd, dialog = self.open_dialog()
+        existing = cmd.commandInputs.itemById(C.ID_EXISTING)
+        self.assertEqual(existing.selectionFilters, ['Features', 'SketchCurves', 'SketchPoints'])
+        self.assertEqual(existing.getSelectionLimits()[1:], (0, 1))
+        self.assertEqual(existing.selectionCount, 0)
+
+
 if __name__ == '__main__':
     unittest.main()

@@ -43,7 +43,21 @@ position / gap mode, flip and the 360° wrap, and reports errors per copy.
   validates, and builds the result. `build()` dispatches to
   `_build_features` (one native Rectangular / Circular Pattern feature per
   copy, quantity 2, extent = the computed position, grouped in the timeline)
-  or `_build_sketch` (one sketch pattern constraint per copy).
+  or `_build_sketch` (one sketch pattern constraint per copy). Every copy
+  gets three attributes in group `FormulaPattern`: `settings` (the dialog
+  values as JSON), `copy` (its number) and `pattern` (a uuid shared by all
+  copies of one pattern).
+* Editing: the *Saved pattern* selection input (`ID_EXISTING`) accepts
+  features, sketch curves and sketch points. `find_pattern()` turns the
+  selection into a `PatternRecord` (the feature or constraint it is or
+  belongs to → its `pattern` id → every copy with that id via
+  `Design.findAttributes`, plus the objects and direction read back from
+  the first copy). `load_pattern()` fills the dialog from it; `build()`
+  then calls `_remove_existing()` before creating the new copies. For
+  features that rolls the timeline marker to the old copies' position,
+  deletes them, builds (new features are inserted at the marker), and puts
+  the marker back; for sketch constraints it deletes each constraint and
+  its `createdEntities`. The edited pattern keeps its id.
 * The handler classes map Fusion's events onto the dialog:
   commandCreated → `Dialog(cmd)` + handler registration; activate →
   `on_activate()`; inputChanged → `on_input_changed()`; validateInputs →
@@ -137,6 +151,22 @@ Fusion's own API errors look like `<code> : <text>`; `build()` appends a
 description of the selected direction and objects to them so a report from a
 user says what was passed.
 
+Taken from the API reference for the edit path, not yet exercised in Fusion
+(the fake models them this way; if Fusion disagrees, fix the fake first):
+
+9. **`TimelineObject.index` is -1 for a feature inside a collapsed group**
+   (and for an expanded group). `_timeline_index()` falls back to the
+   group's index. `Timeline.count` and `markerPosition` count a collapsed
+   group as one item.
+10. **A feature created while the timeline is rolled back is inserted at
+    the marker**, which then moves past it. This is what puts the rebuilt
+    copies where the old ones were.
+11. **Deleting a sketch pattern constraint keeps the copied geometry**;
+    `createdEntities` lists it, so the edit path deletes those too.
+12. **`Design.findAttributes(group, name)`** returns the attributes with
+    that name on every entity, with `parent` set; the edit path filters by
+    value (the pattern id).
+
 ## Checking API names offline
 
 The authoritative stubs are installed with Fusion:
@@ -165,4 +195,5 @@ Fusion writes them next to the sources).
    `CHANGELOG.md`.
 3. Tried in Fusion: open the dialog, change the object type, pattern a
    feature, pattern sketch curves, press OK, reopen and check the remembered
-   values.
+   values, load a saved pattern through *Saved pattern*, change its count
+   and check it is replaced in place.

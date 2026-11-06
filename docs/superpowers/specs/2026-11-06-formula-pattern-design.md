@@ -30,9 +30,12 @@ from a preset.
 ## Non-goals
 
 - Two-direction (grid) patterns, symmetric patterns, path patterns.
-- Editing an existing Formula Pattern from the timeline (settings are
-  stored as attributes on the features so a later version can add this).
-- Patterning construction geometry or sketch entities.
+- Editing an existing Formula Pattern through Fusion's own *Edit Feature*
+  (that would need the Custom Feature API). Since 1.1.0 a saved pattern is
+  edited instead by picking one of its copies in the dialog's *Saved
+  pattern* field; the dialog reloads it from the attributes stored on the
+  copies and OK replaces it in place.
+- Patterning construction geometry.
 
 ## Anti-goals
 

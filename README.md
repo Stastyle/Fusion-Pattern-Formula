@@ -137,10 +137,21 @@ are stored as attributes on the features (`FormulaPattern/settings`).
 The last-used values (not selections) are remembered in
 `~/.fusion_formula_pattern.json`.
 
+### Editing a pattern you made earlier
+
+Run Formula Pattern, click the **Saved pattern** field under *Edit a saved
+pattern*, and click any copy of the pattern (a feature in its timeline group,
+a face it created, or a patterned sketch curve). The dialog loads that
+pattern's objects, direction, formula, values and count; change anything and
+press OK to replace the pattern in place. Clear the field to make a new
+pattern from the loaded values instead.
+
 ## Tips and limits
 
 * Big patterns: the model preview switches itself off above 100 copies
   (the numeric preview stays live); the result is built when you press OK.
+* Replacing a pattern breaks later features that referenced faces of the
+  old copies, as deleting the group would; re-select them afterwards.
 * Only one direction per pattern. For a grid, run the command twice.
 * Construction geometry cannot be patterned, same as the native command.
   Sketch curves use *Object type: Sketch curves* (see above).
