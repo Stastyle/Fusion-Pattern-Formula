@@ -1,0 +1,13 @@
+{
+    "autodeskProduct": "Fusion360",
+    "type": "addin",
+    "id": "65704ecf-6b9b-4a22-9eff-51bdbf9dc072",
+    "author": "Stas Meirovich",
+    "description": {
+        "": "Linear or circular pattern where a formula decides the distance or angle of every copy: guitar frets, growing gaps, easing curves, Fibonacci and your own formulas."
+    },
+    "version": "1.0.0",
+    "runOnStartup": true,
+    "supportedOS": "windows|mac",
+    "editEnabled": true
+}

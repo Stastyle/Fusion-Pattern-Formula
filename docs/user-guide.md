@@ -1,0 +1,305 @@
+# Formula Pattern — User guide
+
+Formula Pattern is a Fusion 360 add-in that works like the native
+Rectangular / Circular Pattern, except that **a formula decides where every
+copy goes**. Guitar fret slots, louvres that get denser toward one end, holes
+whose spacing grows geometrically, rings whose angular step eases in and out:
+pick a preset or write the rule yourself, watch the numbers and the model
+update live, press OK.
+
+It works on bodies, faces, features (cuts included) and components, and on
+sketch curves while you edit a sketch.
+
+Contents
+
+1. [Installing](#1-installing)
+2. [The dialog](#2-the-dialog)
+3. [Walkthroughs](#3-walkthroughs)
+4. [Presets](#4-presets)
+5. [Writing a formula](#5-writing-a-formula)
+6. [What you get](#6-what-you-get)
+7. [Remembered settings](#7-remembered-settings)
+8. [Messages and troubleshooting](#8-messages-and-troubleshooting)
+9. [Limits](#9-limits)
+
+---
+
+## 1. Installing
+
+**Windows**: open PowerShell in the project folder and run
+
+```powershell
+.\install.ps1
+```
+
+**macOS**: open Terminal in the project folder and run
+
+```bash
+./install.sh
+```
+
+Both link the `FormulaPattern` folder into Fusion's AddIns folder, so edits
+to the source are picked up without reinstalling. Add `-Copy` (Windows) or
+`--copy` (macOS) to copy the folder instead.
+
+Manual install: copy the `FormulaPattern` folder to
+
+* Windows: `%APPDATA%\Autodesk\Autodesk Fusion 360\API\AddIns\`
+* macOS: `~/Library/Application Support/Autodesk/Autodesk Fusion 360/API/AddIns/`
+
+Then, in Fusion: **UTILITIES → ADD-INS**, open the **Add-Ins** tab, select
+**FormulaPattern**, click **Run** and tick **Run on Startup**.
+
+The **Formula Pattern** button appears in two places:
+
+* **SOLID → CREATE**, next to Rectangular Pattern.
+* **SKETCH → CREATE**, next to the sketch patterns, while a sketch is open.
+
+It is also reachable from the command search (press `S` and type
+"Formula").
+
+**Updating**: after replacing the add-in's files, select it in the Add-Ins
+dialog, click **Stop**, then **Run**. The add-in clears its cached modules on
+Stop, so no Fusion restart is needed.
+
+---
+
+## 2. The dialog
+
+| Field | What it does |
+|---|---|
+| **Pattern type** | *Linear*: copies along a direction. *Circular*: copies around an axis. |
+| **Object type** | Bodies, Features, Faces, Components or Sketch curves. All selected objects must be of this kind. Changing it clears the selection and switches what can be clicked. |
+| **Objects** | Click what to pattern. |
+| **Direction** (linear) | A linear edge, sketch line or construction axis. In a sketch: a sketch line, or leave it empty to pattern along the sketch's X axis. |
+| **Axis** (circular) | A linear edge, construction axis, sketch line, circular edge, sketch circle, or a cylindrical / conical / toroidal face. In a sketch: a sketch point, or a circle to use its centre. |
+| **Flip direction** | Mirrors the pattern to the other side of the original (negative distances / angles). |
+| **Copies** | How many *new* copies, 1 … 1000. The original stays where it is and is copy 0; the formula runs for `i = 1 … Copies`. |
+| **Preset** | Ready-made formulas (see [Presets](#4-presets)). Picking one fills in the formula, the mode and `a b c`. Editing any of them switches the preset to *Custom* without losing your values. |
+| **Formula gives** | *Distance from original* (or *Angle from original*): the formula is where copy `i` sits, measured from the original. *Gap to previous* (or *Angle step from previous*): the formula is the step from copy `i-1` to copy `i`; the positions add up. |
+| **Formula** | The rule. See [Writing a formula](#5-writing-a-formula). |
+| **a** | A value for the formula with units: a length for linear patterns, an angle for circular ones. Expressions and units work, e.g. `25.5 in` or `scale / 2`. |
+| **b, c** | Plain numbers for the formula. |
+| **Preview** | Every copy's position (and gap), the farthest copy, and any warnings or errors. Updates as you type. |
+| **Show in model** | Builds the copies while the dialog is open. Switches itself off above 100 copies; the result is still built when you press OK. |
+| **Formula reference** | A cheat sheet of the variables, functions and constants (collapsed). |
+| **Advanced** | *Compute*: the same Optimized / Identical / Adjust choice as the native pattern. *Timeline group*: the name of the group that holds the copies. Hidden for sketch curves. |
+
+OK stays disabled while something is missing or the formula has an error.
+
+---
+
+## 3. Walkthroughs
+
+### 3.1 Fret slots in a sketch
+
+1. Edit the sketch that holds the fretboard outline. Draw **one fret slot**
+   as a line at the nut (or a thin rectangle, if the slots have width), and a
+   **construction line** running down the neck in the direction of the frets.
+2. **SKETCH → CREATE → Formula Pattern**. *Object type* is already
+   **Sketch curves**.
+3. **Objects**: click the slot line(s). **Direction**: click the construction
+   line.
+4. **Copies**: the number of frets, e.g. `22`.
+5. **Preset**: **Guitar frets (12-TET)**. Set **a** to the scale length, e.g.
+   `25.5 in` or `648 mm`.
+6. Check the preview: copy 12 sits at exactly half of `a`. Tick **Flip
+   direction** if the frets run the wrong way. **OK**.
+
+Each fret is a native sketch pattern constraint, so editing the slot at the
+nut updates every fret, and each fret's distance is an editable dimension.
+
+### 3.2 Fret slots as a cut
+
+1. Model the first slot as a cut (an extruded profile) at the nut.
+2. **SOLID → CREATE → Formula Pattern**. *Object type*: **Features**, click
+   the slot cut. *Direction*: an edge running along the neck, or a sketch
+   line / construction axis.
+3. As above: *Copies* `22`, preset **Guitar frets (12-TET)**, `a` = scale
+   length. **OK**.
+
+The timeline gets a group *Formula Pattern* with one pattern feature per
+fret.
+
+### 3.3 Louvres that get denser toward one end
+
+Pattern a slot feature or a body with the **Growing gaps (geometric)** preset:
+*Formula gives* = *Gap to previous*, formula `a * b^(i - 1)`, `a` = the first
+gap, `b` = the growth factor. `b = 0.9` makes each gap 10 % smaller than the
+one before; `b = 1.1` makes them grow.
+
+### 3.4 Holes in a phyllotaxis spiral
+
+Pattern type **Circular**, click a hole feature and the axis of the disc,
+preset **Golden angle (phyllotaxis)**: every copy is rotated 137.508° further
+than the previous one. Combine with a radial pattern of the result for a
+sunflower-style layout.
+
+### 3.5 Driving a formula from a user parameter
+
+Any user parameter of the design (MODIFY → Change Parameters) can be used by
+name. With a parameter `scale = 648 mm`:
+
+```
+scale * (1 - 1 / 2^(i / 12))
+```
+
+Lengths arrive in the document's units, angles in degrees, unitless
+parameters as plain numbers. The pattern does not update automatically when
+the parameter changes; run the command again.
+
+---
+
+## 4. Presets
+
+| Preset | Formula gives | Formula | Tunables |
+|---|---|---|---|
+| Custom | — | whatever you type | — |
+| Constant spacing | gap | `a` | a = gap |
+| Guitar frets (12-TET) · linear only | distance | `a * (1 - 1 / 2^(i / 12))` | a = scale length |
+| Growing gaps (geometric) | gap | `a * b^(i - 1)` | a = first gap, b = growth factor |
+| Growing gaps (arithmetic) | gap | `a + b * (i - 1)` | a = first gap, b = increase per gap |
+| Ease in & out (sine) | distance | `a * (1 - cos(pi * t)) / 2` | a = total extent |
+| Ease in (power) | distance | `a * t^b` | a = total extent, b = curve (1 = even, 2 = quadratic) |
+| Fibonacci gaps | gap | `a * fib(i)` | a = first gap |
+| Golden angle (phyllotaxis) · circular only | angle step | `a` | a = 137.508° |
+
+The notes under the tunables explain what `a`, `b` and `c` mean for the
+chosen preset.
+
+---
+
+## 5. Writing a formula
+
+### Variables
+
+| Name | Meaning |
+|---|---|
+| `i` | the copy number, 1 … n (the original is 0 and is never moved) |
+| `n` | the number of copies |
+| `t` | `i / n`, running from just above 0 to 1; handy for easing curves |
+| `a` | the *a* field, in document units (linear) or degrees (circular) |
+| `b`, `c` | the *b* and *c* fields, plain numbers |
+| user parameters | any user parameter of the design, by name |
+
+### Operators and functions
+
+* `+ - * /`, `^` (power; `**` also works), `%` (remainder), parentheses.
+* Comparisons and conditionals: `a if i < 5 else 2 * a`.
+* Trigonometry in radians: `sin cos tan asin acos atan atan2`;
+  in degrees: `sind cosd tand asind acosd atand`; `rad(x)`, `deg(x)`.
+* `sqrt cbrt exp pow ln log log2 log10`.
+* `abs floor ceil round trunc min max clamp(x, lo, hi) sign hypot`.
+* `fib(k)`: the k-th Fibonacci number.
+* Constants: `pi`, `e`, `tau`, `phi` (the golden ratio).
+
+Anything else (names, attribute access, indexing, string operations) is
+rejected: the evaluator only runs arithmetic.
+
+### Position or gap
+
+*Formula gives* chooses the meaning of the result:
+
+* **Distance from original** / **Angle from original**: the formula is the
+  absolute offset of copy `i`.
+* **Gap to previous** / **Angle step from previous**: the formula is the step
+  from copy `i-1` to copy `i`, and the positions are the running sum.
+
+A fret formula is naturally a *distance* (each fret is measured from the
+nut); a geometric growth is naturally a *gap*.
+
+### Rules
+
+* **Flip direction** negates every position.
+* Circular angles are reduced into 0 … 360°, so copy 13 of a 30° step lands
+  back on copy 1 and is reported as a duplicate.
+* A copy that lands on the original (distance 0, or a multiple of 360°) is an
+  error naming the copy; two copies on the same spot are a warning.
+* Results must be finite real numbers; overflow, division by zero and
+  complex results are errors.
+
+### Examples
+
+| Goal | Formula gives | Formula |
+|---|---|---|
+| 12 evenly spaced copies over 100 mm | distance | `100 * t` (or preset Constant with `a` = 100/12) |
+| Gaps that shrink to half over the pattern | gap | `a * (1 - t / 2)` |
+| Copies that bunch up at both ends | distance | `a * (1 - cos(pi * t)) / 2` |
+| Alternating 10 mm and 15 mm gaps | gap | `10 if i % 2 else 15` |
+| Logarithmic spacing | distance | `a * ln(1 + b * i) / ln(1 + b * n)` |
+
+---
+
+## 6. What you get
+
+### Solid patterns
+
+A timeline group (default name *Formula Pattern*, change it under
+*Advanced*) holding **one native pattern feature per copy**, named
+`Formula Pattern 3/12` and so on. Each is a normal Rectangular / Circular
+Pattern with quantity 2 and the computed extent, so afterwards you can edit,
+suppress or delete individual copies, and every distance is an editable
+parameter. The settings used are stored as attributes on each feature
+(group `FormulaPattern`, names `settings` and `copy`).
+
+Features are created in the active component, like the native command.
+
+### Sketch patterns
+
+One native **sketch pattern constraint per copy** in the sketch that owns the
+selected curves, with quantity 2 and the computed extent. Copies follow the
+original curves when you edit them, and each copy's distance is a dimension
+you can change. Sketch patterns are not timeline items, so there is no
+group.
+
+---
+
+## 7. Remembered settings
+
+The last-used values (pattern type, object type, copies, preset, mode,
+formula, `a b c`, flip, show-in-model, compute option, group name) are saved
+when you press OK and restored next time. Selections are not remembered.
+While a sketch is being edited, *Sketch curves* is always preselected.
+
+The file is `~/.fusion_formula_pattern.json`; delete it to start from the
+defaults.
+
+---
+
+## 8. Messages and troubleshooting
+
+Messages appear in red in the **Preview** box; OK is disabled until they
+are resolved.
+
+| Message | Meaning | What to do |
+|---|---|---|
+| `Can't read the formula …` | Syntax error, unknown name or disallowed construct. | Check spelling and parentheses; see the Formula reference. |
+| `'b' is not a valid number: …` | The `a`, `b` or `c` field holds something Fusion cannot evaluate. | Type a number or expression; `a` accepts units. |
+| `Copy i = 7: …` | The formula failed for that copy (overflow, division by zero, complex result). | Change the formula or the tunables. |
+| `Copy 3 lands on the original` | The formula gave 0 (or a multiple of 360°) for that copy. | Use *Gap to previous*, add an offset, or change the formula. |
+| `⚠ …` | A warning; the pattern is still built. | Duplicate positions, for example. |
+| `Select the objects …` / `Select the centre point …` | Something is not selected yet. | Select it. |
+| `All selected curves must be in the same sketch` | Sketch curves from two sketches were selected. | Select curves from one sketch; run the command once per sketch. |
+| `The direction / centre must be in the same sketch as the curves` | The direction line or centre point is in another sketch. | Pick one from the same sketch, or draw a construction line there. |
+| `Fusion could not create copy 4 of 22 at 110 mm` | Fusion refused that pattern (for example a cut that would leave nothing). | Check the model at that position; try the *Adjust* compute option. |
+| `3 : invalid argument … — direction: …; objects: …` | Fusion's own API rejected an argument; the text after the dash says what was passed. | Report it with the full message. |
+| Model preview is off above 100 copies | Just information. | OK still builds the result. |
+
+Start-up problems show a message box:
+
+* **Formula Pattern failed to start** / **could not open the dialog**: the
+  box contains a traceback; stop and run the add-in again and, if it
+  persists, report the traceback.
+* The button is missing: run the add-in from UTILITIES → ADD-INS, or open
+  the command from the command search (`S`).
+
+---
+
+## 9. Limits
+
+* One direction per pattern. For a grid, run the command twice.
+* Construction geometry (planes, axes, points) cannot be patterned.
+* The result is parametric per copy, but not linked to the formula: changing
+  `a` or a user parameter later means running the command again.
+* Sketch patterns need a sketch line as direction (or none for the X axis);
+  model edges cannot drive them.
