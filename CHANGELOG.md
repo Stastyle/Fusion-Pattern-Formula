@@ -2,14 +2,16 @@
 
 ## 1.1.0 — 2026-11-06
 
-* Edit a saved pattern: the new *Saved pattern* field (under *Edit a saved
-  pattern*) takes any copy of a pattern made by Formula Pattern, a feature
-  in its timeline group, a face it created or a patterned sketch curve, and
-  loads that pattern's objects, direction or axis, count, preset, formula,
-  values and flip. OK replaces the old copies in place in the timeline, with
-  the same group name; sketch patterns are rebuilt without leaving the old
-  copies behind. Clearing the field makes a new pattern from the loaded
-  values.
+* Edit a saved pattern: the new *Saved pattern* list (under *Edit a saved
+  pattern*) names every pattern made by Formula Pattern in the design, by
+  group name and number of copies, plus the sketch patterns of the sketch
+  being edited. Picking one loads its objects, direction or axis, count,
+  preset, formula, values and flip, and highlights its copies (listed in the
+  *Copies* field, where clicking any copy of a pattern picks it too). After
+  a change, OK replaces the old copies in place in the timeline with the
+  same group name; sketch patterns are rebuilt without leaving the old
+  copies behind. With nothing changed, OK leaves the model alone. *New
+  pattern* makes a new one from the loaded values.
 * Every copy now carries a `pattern` attribute (the pattern's id) next to
   `settings` and `copy`. Patterns made with 1.0.0 have no id and cannot be
   loaded; the dialog says so.

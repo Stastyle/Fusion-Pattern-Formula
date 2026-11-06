@@ -47,17 +47,25 @@ position / gap mode, flip and the 360° wrap, and reports errors per copy.
   gets three attributes in group `FormulaPattern`: `settings` (the dialog
   values as JSON), `copy` (its number) and `pattern` (a uuid shared by all
   copies of one pattern).
-* Editing: the *Saved pattern* selection input (`ID_EXISTING`) accepts
-  features, sketch curves and sketch points. `find_pattern()` turns the
-  selection into a `PatternRecord` (the feature or constraint it is or
-  belongs to → its `pattern` id → every copy with that id via
-  `Design.findAttributes`, plus the objects and direction read back from
-  the first copy). `load_pattern()` fills the dialog from it; `build()`
-  then calls `_remove_existing()` before creating the new copies. For
-  features that rolls the timeline marker to the old copies' position,
-  deletes them, builds (new features are inserted at the marker), and puts
-  the marker back; for sketch constraints it deletes each constraint and
-  its `createdEntities`. The edited pattern keeps its id.
+* Editing: `list_patterns()` runs when the dialog is created and fills the
+  *Saved pattern* drop-down (`ID_PATTERN_LIST`) with one `PatternRecord`
+  per pattern id, found through `Design.findAttributes` and, as a backstop,
+  by walking the timeline (groups included) and the active sketch's
+  constraints. A record holds the copies, the objects and direction read
+  back from the first copy, a label (group name and copy count, or sketch
+  name for sketch patterns) and what to highlight. `choose_pattern()`
+  selects the entry, calls `load_pattern()` to fill the inputs, and puts
+  the copies (features, or the copied sketch curves) into the *Copies*
+  selection input (`ID_EXISTING`), which is how Fusion highlights them; a
+  copy clicked into that input goes through `find_pattern()` to the same
+  place. `dirty` is set by any later input change; while a loaded pattern
+  is `unchanged`, neither the preview nor OK rebuilds anything. `build()`
+  clears the highlight (it would hold deleted entities) and calls
+  `_remove_existing()` before creating the new copies: for features that
+  rolls the timeline marker to the old copies' position, deletes them,
+  builds (new features are inserted at the marker), and puts the marker
+  back; for sketch constraints it deletes each constraint and its
+  `createdEntities`. The edited pattern keeps its id.
 * The handler classes map Fusion's events onto the dialog:
   commandCreated → `Dialog(cmd)` + handler registration; activate →
   `on_activate()`; inputChanged → `on_input_changed()`; validateInputs →

@@ -139,12 +139,14 @@ The last-used values (not selections) are remembered in
 
 ### Editing a pattern you made earlier
 
-Run Formula Pattern, click the **Saved pattern** field under *Edit a saved
-pattern*, and click any copy of the pattern (a feature in its timeline group,
-a face it created, or a patterned sketch curve). The dialog loads that
-pattern's objects, direction, formula, values and count; change anything and
-press OK to replace the pattern in place. Clear the field to make a new
-pattern from the loaded values instead.
+Run Formula Pattern and pick the pattern from the **Saved pattern** list
+under *Edit a saved pattern*; it lists every pattern in the design by group
+name and number of copies. The dialog loads that pattern's objects,
+direction, formula, values and count and highlights its copies; change
+anything and press OK to replace the pattern in place. You can also click any
+copy (a feature in its timeline group, a face it created, or a patterned
+sketch curve) in the **Copies** field to pick its pattern. *New pattern* in
+the list makes a new one from the loaded values instead.
 
 ## Tips and limits
 

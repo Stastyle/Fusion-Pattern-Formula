@@ -83,7 +83,9 @@ ID_ADVANCED_GROUP = 'fpAdvancedGroup'
 ID_COMPUTE = 'fpCompute'
 ID_GROUP_NAME = 'fpGroupName'
 ID_EDIT_GROUP = 'fpEditGroup'
+ID_PATTERN_LIST = 'fpPatternList'
 ID_EXISTING = 'fpExisting'
+NEW_PATTERN_LABEL = 'New pattern'
 
 OBJECT_SKETCH = 'Sketch curves'
 OBJECT_TYPES = (
@@ -110,7 +112,7 @@ PROMPTS = {
     'direction_sketch': 'Select a sketch line, or leave empty to use the sketch X axis',
     'axis': 'Select an axis: edge, circle, cylindrical face, sketch line or construction axis',
     'axis_sketch': 'Select the centre: a sketch point or a circle',
-    'existing': 'Click any copy of a saved Formula Pattern to load and change it',
+    'copies': 'The copies of the chosen pattern. Click any copy of a Formula Pattern to pick that pattern',
 }
 # Internal-unit values the value inputs are created with (see Dialog._number).
 NUMBER_DEFAULTS = {ID_A_LEN: 1.0, ID_A_ANG: math.radians(15.0), ID_B: 0.0, ID_C: 0.0}
@@ -249,6 +251,8 @@ class Dialog:
         self.preset_ids = []          # id of each row of the preset drop-down, in order
         self.last_error = None
         self.editing = None           # PatternRecord of the saved pattern being edited, if any
+        self.dirty = False            # something changed since the saved pattern was loaded
+        self.patterns = []            # PatternRecords offered in the "Saved pattern" list, in order
         self.saved = load_settings()
         self._build()
         self._apply_settings(self.saved)
@@ -344,13 +348,24 @@ class Dialog:
 
         group = inputs.addGroupCommandInput(ID_EDIT_GROUP, 'Edit a saved pattern')
         group.isExpanded = True
-        sel = group.children.addSelectionInput(ID_EXISTING, 'Saved pattern', PROMPTS['existing'])
+        try:
+            self.patterns = list_patterns(self.design, self.active_sketch)
+        except Exception:
+            self.patterns = []
+        dd = group.children.addDropDownCommandInput(ID_PATTERN_LIST, 'Saved pattern',
+                                                    adsk.core.DropDownStyles.TextListDropDownStyle)
+        dd.listItems.add(NEW_PATTERN_LABEL, True)
+        for record in self.patterns:
+            dd.listItems.add(record.label, False)
+        dd.tooltip = ('Every pattern made by Formula Pattern in this design. Pick one to load its objects, '
+                      'direction, formula and values and to highlight its copies; OK then replaces it in '
+                      'place. "New pattern" makes a new one.')
+        sel = group.children.addSelectionInput(ID_EXISTING, 'Copies', PROMPTS['copies'])
         self._set_filters(sel, EXISTING_FILTERS)
-        sel.setSelectionLimits(0, 1)
-        sel.tooltip = ('Click any copy of a pattern made by Formula Pattern: a feature in its timeline group '
-                       '(or a face it created), or a patterned sketch curve. The dialog loads that pattern\'s '
-                       'formula, values, objects and direction, and OK replaces it in place. '
-                       'Clear this to make a new pattern instead.')
+        sel.setSelectionLimits(0, 0)
+        sel.tooltip = ('The copies of the chosen pattern, highlighted in the model and the timeline. '
+                       'You can also click any copy of a Formula Pattern here (a feature in its timeline '
+                       'group, a face it created, or a patterned sketch curve) to pick that pattern.')
 
         group = inputs.addGroupCommandInput(ID_REFERENCE_GROUP, 'Formula reference')
         group.isExpanded = False
@@ -542,46 +557,98 @@ class Dialog:
 
     def on_input_changed(self, changed: adsk.core.CommandInput):
         cid = changed.id
-        if cid == ID_TYPE:
+        if cid == ID_PATTERN_LIST:
+            self.on_pattern_list_changed()
+        elif cid == ID_EXISTING:
+            self.on_existing_changed()
+        elif cid == ID_TYPE:
+            self.dirty = True
             self.on_type_changed()
         elif cid == ID_OBJECT_TYPE:
+            self.dirty = True
             self.on_object_type_changed()
             return
         elif cid == ID_PRESET:
+            self.dirty = True
             self.apply_preset(self.preset_id)
-        elif cid == ID_FORMULA:
+        elif cid in (ID_FORMULA, ID_MODE):
+            self.dirty = True
             self._switch_to_custom_if_edited()
-        elif cid == ID_MODE:
-            self._switch_to_custom_if_edited()
-        elif cid == ID_EXISTING:
-            self.on_existing_changed()
-        elif cid not in (ID_COUNT, ID_A_LEN, ID_A_ANG, ID_B, ID_C, ID_FLIP, ID_LIVE,
-                         ID_OBJECTS, ID_DIRECTION, ID_AXIS):
+        elif cid in (ID_COUNT, ID_A_LEN, ID_A_ANG, ID_B, ID_C, ID_FLIP, ID_OBJECTS, ID_DIRECTION, ID_AXIS):
+            self.dirty = True
+        elif cid in (ID_COMPUTE, ID_GROUP_NAME):
+            self.dirty = True
+            return
+        elif cid != ID_LIVE:
             return
         self.refresh_preview()
 
+    def on_pattern_list_changed(self):
+        dd = adsk.core.DropDownCommandInput.cast(self._input(ID_PATTERN_LIST))
+        index = dd.selectedItem.index if dd.selectedItem is not None else 0
+        self.choose_pattern(self.patterns[index - 1] if 1 <= index <= len(self.patterns) else None)
+
     def on_existing_changed(self):
-        """The "Saved pattern" selection: load the pattern it belongs to, or say why not."""
+        """The Copies input: a copy clicked picks its pattern; cleared by the user drops the edit."""
         sel = adsk.core.SelectionCommandInput.cast(self._input(ID_EXISTING))
+        if sel.selectionCount == 0:
+            if self.editing is not None or self.last_error:
+                self.choose_pattern(None)
+            return
+        entity = sel.selection(sel.selectionCount - 1).entity     # the one just clicked
+        try:
+            record = find_pattern(self.design, entity)
+        except NotAPattern as e:
+            self.editing, self.dirty = None, False
+            self.last_error = str(e)
+            self._select_list_entry(None)
+            return
+        self.choose_pattern(record)
+
+    def choose_pattern(self, record):
+        """Edit ``record`` (None: make a new pattern). Selects it in the list, loads it into the
+        dialog and highlights its copies through the Copies input. Nothing is rebuilt until the
+        user changes something (see ``unchanged``)."""
         self.last_error = None
         self.editing = None
-        if sel.selectionCount == 0:
-            return
-        try:
-            record = find_pattern(self.design, sel.selection(0).entity)
-        except NotAPattern as e:
-            self.last_error = str(e)
+        self.dirty = False
+        copies = adsk.core.SelectionCommandInput.cast(self._input(ID_EXISTING))
+        copies.clearSelection()
+        self._select_list_entry(record)
+        if record is None:
             return
         self.load_pattern(record)
+        self.editing = record
+        for e in record.highlight:
+            try:
+                copies.addSelection(e)
+            except Exception:
+                pass
+
+    def _select_list_entry(self, record):
+        dd = adsk.core.DropDownCommandInput.cast(self._input(ID_PATTERN_LIST))
+        if record is None:
+            dd.listItems.item(0).isSelected = True
+            return
+        for k, known in enumerate(self.patterns):
+            if known.id == record.id:
+                dd.listItems.item(k + 1).isSelected = True
+                return
+        self.patterns.append(record)          # reached through a click, not listed at opening
+        dd.listItems.add(record.label, True)
+
+    @property
+    def unchanged(self) -> bool:
+        """A saved pattern is loaded and nothing was changed: leave the model as it is."""
+        return self.editing is not None and not self.dirty
 
     def load_pattern(self, record):
-        """Fill the dialog from a saved pattern; OK will then replace it (see build())."""
+        """Fill the dialog's inputs from a saved pattern."""
         self._apply_settings(record.settings, force_object_type=True)
         self._apply_number_settings(record.settings)
         self._fill_selection(ID_OBJECTS, record.objects)
         self._fill_selection(ID_AXIS if self.circular else ID_DIRECTION,
                              [record.reference] if record.reference is not None else [])
-        self.editing = record
 
     def _fill_selection(self, input_id, entities):
         sel = adsk.core.SelectionCommandInput.cast(self._input(input_id))
@@ -593,11 +660,9 @@ class Dialog:
                 pass              # the user re-selects what Fusion would not take back
 
     def _editing_note(self) -> str:
-        record = self.editing
-        n = len(record.copies)
-        what = 'sketch pattern' if record.kind == 'sketch' else \
-            f'“{record.settings.get("group_name") or DEFAULT_GROUP_NAME}”'
-        return f'✎ Editing <b>{what}</b> ({n} {"copy" if n == 1 else "copies"}): OK replaces it.'
+        if self.dirty:
+            return f'✎ Editing <b>{self.editing.label}</b>: OK replaces it.'
+        return f'✎ Editing <b>{self.editing.label}</b>: change something, then OK replaces it.'
 
     def on_type_changed(self):
         circular = self.circular
@@ -699,6 +764,8 @@ class Dialog:
         self._pattern_id = self.editing.id if self.editing else uuid.uuid4().hex
         try:
             if self.editing:
+                # The highlight must not keep hold of copies that are about to be deleted.
+                adsk.core.SelectionCommandInput.cast(self._input(ID_EXISTING)).clearSelection()
                 self._remove_existing(self.editing)
             if self.sketch_mode:
                 return self._build_sketch(spec, result, entities, reference)
@@ -937,20 +1004,24 @@ class NotAPattern(ValueError):
 
 
 class PatternRecord:
-    """A saved pattern, found from one of its copies.
+    """A saved pattern, found from its copies.
 
     ``copies`` are the pattern features (kind 'features') or sketch pattern constraints
     (kind 'sketch') that make it up; ``objects`` and ``reference`` are what it patterned
-    and along / around what.
+    and along / around what; ``highlight`` is what to show the user (the features, or the
+    copied sketch curves); ``position`` orders patterns the way the timeline does.
     """
 
-    def __init__(self, pattern_id, settings, copies, kind, objects, reference):
+    def __init__(self, pattern_id, settings, copies, kind, objects, reference, label, highlight, position):
         self.id = pattern_id
         self.settings = settings
         self.copies = copies
         self.kind = kind
         self.objects = objects
         self.reference = reference
+        self.label = label
+        self.highlight = highlight
+        self.position = position
 
 
 def find_pattern(design, entity) -> PatternRecord:
@@ -963,32 +1034,124 @@ def find_pattern(design, entity) -> PatternRecord:
     if not pattern_id:
         raise NotAPattern('This copy was made by an older version of Formula Pattern and cannot be '
                           'loaded; delete its group and create the pattern again')
+    copies = [a.parent for a in _find_attributes(design) if a.value == pattern_id and a.parent is not None]
+    copies += [e for e in _timeline_entities(design) if _attribute(e, 'pattern') == pattern_id]
+    return _record(pattern_id, _distinct(copies) or [source])
+
+
+def list_patterns(design, sketch=None) -> list:
+    """Every saved pattern in the design, in timeline order (plus the sketch patterns of
+    ``sketch``, the sketch being edited). Finds them through Design.findAttributes and, in
+    case that misses some, by walking the timeline and the sketch's constraints."""
+    copies = {}                                   # pattern id → its copies
+    for a in _find_attributes(design):
+        if a.value and a.parent is not None:
+            copies.setdefault(a.value, []).append(a.parent)
+    candidates = list(_timeline_entities(design))
+    if sketch is not None:
+        try:
+            candidates += list(sketch.geometricConstraints)
+        except Exception:
+            pass
+    for entity in candidates:
+        pattern_id = _attribute(entity, 'pattern')
+        if pattern_id:
+            copies.setdefault(pattern_id, []).append(entity)
+    records = [_record(pattern_id, _distinct(items)) for pattern_id, items in copies.items()]
+    records.sort(key=lambda r: (r.position, r.label))
+    seen = set()
+    for record in records:                        # the drop-down needs distinct labels
+        base, k = record.label, 2
+        while record.label in seen:
+            record.label = f'{base} #{k}'
+            k += 1
+        seen.add(record.label)
+    return records
+
+
+def _record(pattern_id, copies) -> PatternRecord:
+    copies = sorted(copies, key=_copy_number)
+    source = copies[0]
     try:
         settings = json.loads(_attribute(source, 'settings') or '{}')
     except ValueError:
         settings = {}
     if not isinstance(settings, dict):
         settings = {}
-    copies = [a.parent for a in design.findAttributes(ATTRIBUTE_GROUP, 'pattern')
-              if a.value == pattern_id and a.parent is not None]
-    if not copies:
-        copies = [source]
-    copies.sort(key=_copy_number)
     kind = 'sketch' if _type_name(source).endswith('Constraint') else 'features'
     circular = _type_name(source).startswith('Circular')
-    first = copies[0]
     objects, reference = [], None
     try:
         if kind == 'sketch':
-            objects = list(first.entities)
-            reference = first.centerPoint if circular else first.directionOneEntity
+            objects = list(source.entities)
+            reference = source.centerPoint if circular else source.directionOneEntity
         else:
-            inputs = first.inputEntities
+            inputs = source.inputEntities
             objects = [inputs.item(k) for k in range(inputs.count)]
-            reference = first.axis if circular else first.directionOneEntity
+            reference = source.axis if circular else source.directionOneEntity
     except Exception:
         pass                      # the user re-selects what could not be read back
-    return PatternRecord(pattern_id, settings, copies, kind, objects, reference)
+    n = len(copies)
+    count = f'{n} {"copy" if n == 1 else "copies"}'
+    position = 10 ** 9            # sketch patterns and anything not in the timeline go last
+    if kind == 'sketch':
+        highlight = []
+        for constraint in copies:
+            try:
+                highlight.extend(list(constraint.createdEntities))
+            except Exception:
+                pass
+        try:
+            where = source.parentSketch.name
+        except Exception:
+            where = 'Sketch'
+        label = f'{where} sketch pattern ({count})'
+    else:
+        highlight = list(copies)
+        try:
+            position = min(_timeline_index(c) for c in copies)
+        except Exception:
+            pass
+        label = f'{settings.get("group_name") or DEFAULT_GROUP_NAME} ({count})'
+    return PatternRecord(pattern_id, settings, copies, kind, objects, reference, label, highlight, position)
+
+
+def _find_attributes(design) -> list:
+    try:
+        return list(design.findAttributes(ATTRIBUTE_GROUP, 'pattern'))
+    except Exception:
+        return []
+
+
+def _timeline_entities(design) -> list:
+    """Every feature in the timeline, inside collapsed groups too."""
+    found = []
+    try:
+        timeline = design.timeline
+        for i in range(timeline.count):
+            item = timeline.item(i)
+            group = adsk.fusion.TimelineGroup.cast(item)
+            if group is not None:
+                found += [group.item(j).entity for j in range(group.count)]
+            else:
+                found.append(item.entity)
+    except Exception:
+        pass
+    return [e for e in found if e is not None]
+
+
+def _distinct(entities) -> list:
+    """Drop duplicates (Fusion hands out a fresh wrapper object for every lookup)."""
+    seen, out = set(), []
+    for e in entities:
+        try:
+            key = e.entityToken or id(e)
+        except Exception:
+            key = id(e)
+        if key not in seen:
+            seen.add(key)
+            out.append(e)
+    return out
 
 
 def _pattern_source(entity):
@@ -1158,7 +1321,7 @@ class ExecutePreviewHandler(adsk.core.CommandEventHandler):
     def notify(self, args: adsk.core.CommandEventArgs):
         dialog = self.dialog
         try:
-            if not dialog.live or dialog.count > MAX_MODEL_PREVIEW or not dialog.is_valid():
+            if dialog.unchanged or not dialog.live or dialog.count > MAX_MODEL_PREVIEW or not dialog.is_valid():
                 return
             had_error = dialog.last_error is not None
             dialog.build()
@@ -1180,6 +1343,8 @@ class ExecuteHandler(adsk.core.CommandEventHandler):
 
     def notify(self, args: adsk.core.CommandEventArgs):
         try:
+            if self.dialog.unchanged:
+                return                # OK on a loaded pattern with nothing changed: leave it
             self.dialog.build()
         except Exception as e:
             args.executeFailed = True

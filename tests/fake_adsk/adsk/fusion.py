@@ -65,6 +65,10 @@ class TimelineObject(core.Base):
 
 
 class TimelineGroup(TimelineObject):
+    @classmethod
+    def cast(cls, obj):
+        return obj if isinstance(obj, TimelineGroup) else None
+
     def __init__(self, timeline, members, start, end):
         super().__init__(timeline, None)
         self._members = members

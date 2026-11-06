@@ -744,11 +744,125 @@ class SketchMode(FusionHarness):
 
 
 class EditingSavedPattern(FusionHarness):
-    """Click any copy of a saved Formula Pattern in the "Saved pattern" input: the dialog loads
-    its formula, values, objects and direction, and OK replaces the pattern in place."""
+    """Pick a saved Formula Pattern from the "Saved pattern" list (or click one of its copies):
+    the dialog loads its formula, values, objects and direction, highlights its copies, and
+    OK replaces the pattern in place once something was changed."""
 
     def finish(self, cmd):
         cmd.destroy.fire(adsk.core.CommandEventArgs(cmd, adsk.core.CommandTerminationReason.CompletedTerminationReason))
+
+    def pick(self, cmd, label):
+        self.choose(cmd, C.ID_PATTERN_LIST, label)
+
+    def list_names(self, cmd):
+        return [item.name for item in cmd.commandInputs.itemById(C.ID_PATTERN_LIST).listItems]
+
+    def highlighted(self, cmd):
+        sel = cmd.commandInputs.itemById(C.ID_EXISTING)
+        return [sel.selection(k).entity for k in range(sel.selectionCount)]
+
+    # ---- the list ----
+
+    def test_the_list_offers_every_saved_pattern_in_timeline_order(self):
+        self.make_linear(count=3, group='Frets')
+        self.make_linear(count=2, group='Louvres')
+        cmd, dialog = self.open_dialog()
+        self.assertEqual(self.list_names(cmd), ['New pattern', 'Frets (3 copies)', 'Louvres (2 copies)'])
+        self.assertIsNone(dialog.editing)
+        self.assertEqual(self.highlighted(cmd), [])
+
+    def test_choosing_from_the_list_loads_the_pattern_and_highlights_its_copies(self):
+        feats = self.make_linear(count=4, group='Frets')
+        cmd, dialog = self.open_dialog()
+        self.choose(cmd, C.ID_TYPE, 'Circular')          # the dialog must switch back to linear
+        self.pick(cmd, 'Frets (4 copies)')
+        self.assertTrue(dialog.editing)
+        self.assertFalse(dialog.circular)
+        self.assertEqual(dialog.preset_id, 'frets')
+        self.assertEqual(dialog.count, 4)
+        self.assertEqual(dialog.group_name, 'Frets')
+        self.assertEqual(cmd.commandInputs.itemById(C.ID_OBJECTS).selection(0).entity.name, 'slot')
+        self.assertEqual(cmd.commandInputs.itemById(C.ID_DIRECTION).selection(0).entity.name, 'neck edge')
+        self.assertEqual(self.highlighted(cmd), feats, 'every copy is highlighted')
+        self.assertIn('Editing', self.preview_text(cmd))
+        self.assertIn('Frets (4 copies)', self.preview_text(cmd))
+        self.assertTrue(self.validate(cmd))
+
+    def test_choosing_new_pattern_drops_the_edit_and_the_highlight(self):
+        old = self.make_linear(count=3, group='Frets')
+        cmd, dialog = self.open_dialog()
+        self.pick(cmd, 'Frets (3 copies)')
+        self.pick(cmd, 'New pattern')
+        self.assertIsNone(dialog.editing)
+        self.assertEqual(self.highlighted(cmd), [])
+        self.assertTrue(self.preview(cmd).isValidResult, self.preview_text(cmd))
+        self.assertFalse(any(f._deleted for f in old))
+        self.assertEqual(self.design.rootComponent.features.rectangularPatternFeatures.count, 6)
+
+    def test_clicking_a_copy_selects_its_entry_in_the_list_and_highlights_the_rest(self):
+        feats = self.make_linear(count=3, group='Frets')
+        self.make_linear(count=2, group='Louvres')
+        cmd, dialog = self.open_dialog()
+        self.load(cmd, feats[1])
+        self.assertEqual(cmd.commandInputs.itemById(C.ID_PATTERN_LIST).selectedItem.name, 'Frets (3 copies)')
+        self.assertEqual(self.highlighted(cmd), feats)
+        self.assertEqual(dialog.editing.id, feats[0].attributes.itemByName('FormulaPattern', 'pattern').value)
+
+    def test_nothing_is_rebuilt_until_something_changes(self):
+        old = self.make_linear(count=3, group='Frets')
+        cmd, dialog = self.open_dialog()
+        self.pick(cmd, 'Frets (3 copies)')
+        self.assertFalse(self.preview(cmd).isValidResult, 'unchanged: nothing to rebuild')
+        self.assertFalse(any(f._deleted for f in old))
+        self.assertEqual(len(self.highlighted(cmd)), 3, 'the highlight stays')
+        cmd.execute.fire(adsk.core.CommandEventArgs(cmd))     # OK without changes
+        self.assertFalse(any(f._deleted for f in old))
+        self.assertEqual(self.design.rootComponent.features.rectangularPatternFeatures.count, 3)
+
+        cmd.commandInputs.itemById(C.ID_COUNT).value = 5
+        self.changed(cmd, C.ID_COUNT)
+        self.assertTrue(self.preview(cmd).isValidResult, self.preview_text(cmd))
+        self.assertTrue(all(f._deleted for f in old))
+        self.assertEqual(self.highlighted(cmd), [], 'deleted copies are not left in the highlight')
+        self.assertEqual(self.design.rootComponent.features.rectangularPatternFeatures.count, 5)
+
+    def test_sketch_patterns_of_the_sketch_being_edited_are_listed(self):
+        sketch = adsk.fusion.Sketch('Fretboard')
+        fret, axis_line = sketch.line('fret slot'), sketch.line('centre line')
+        self.app.activeEditObject = sketch
+        cmd, dialog = self.open_dialog()
+        self.select(cmd, C.ID_OBJECTS, fret)
+        self.select(cmd, C.ID_DIRECTION, axis_line)
+        cmd.commandInputs.itemById(C.ID_COUNT).value = 3
+        self.changed(cmd, C.ID_COUNT)
+        self.assertTrue(self.preview(cmd).isValidResult, self.preview_text(cmd))
+        self.finish(cmd)
+        constraints = list(sketch.geometricConstraints.created)
+
+        cmd, dialog = self.open_dialog()
+        self.assertEqual(self.list_names(cmd), ['New pattern', 'Fretboard sketch pattern (3 copies)'])
+        self.pick(cmd, 'Fretboard sketch pattern (3 copies)')
+        self.assertEqual(dialog.object_type, 'Sketch curves')
+        self.assertEqual(dialog.count, 3)
+        self.assertIs(cmd.commandInputs.itemById(C.ID_OBJECTS).selection(0).entity, fret)
+        self.assertIs(cmd.commandInputs.itemById(C.ID_DIRECTION).selection(0).entity, axis_line)
+        self.assertEqual(self.highlighted(cmd), [e for c in constraints for e in c.createdEntities])
+
+    def test_patterns_are_found_from_the_timeline_when_findattributes_fails(self):
+        old = self.make_linear(count=3, group='Frets')
+
+        def broken(group, name):
+            raise RuntimeError('2 : InternalValidationError : res')
+        self.design.findAttributes = broken
+        cmd, dialog = self.open_dialog()
+        self.assertEqual(self.list_names(cmd), ['New pattern', 'Frets (3 copies)'])
+        self.pick(cmd, 'Frets (3 copies)')
+        self.assertEqual(self.highlighted(cmd), old)
+        cmd.commandInputs.itemById(C.ID_COUNT).value = 2
+        self.changed(cmd, C.ID_COUNT)
+        self.assertTrue(self.preview(cmd).isValidResult, self.preview_text(cmd))
+        self.assertTrue(all(f._deleted for f in old))
+        self.assertEqual(self.design.rootComponent.features.rectangularPatternFeatures.count, 2)
 
     def make_linear(self, count=3, group='Frets', preset='Guitar frets (12-TET)'):
         cmd, dialog = self.open_dialog()
@@ -964,11 +1078,11 @@ class EditingSavedPattern(FusionHarness):
         self.assertTrue(dialog.circular)
         self.assertIs(cmd.commandInputs.itemById(C.ID_AXIS).selection(0).entity, hub)
 
-    def test_the_saved_pattern_input_accepts_features_and_sketch_curves(self):
+    def test_the_copies_input_accepts_features_and_sketch_curves_without_limit(self):
         cmd, dialog = self.open_dialog()
         existing = cmd.commandInputs.itemById(C.ID_EXISTING)
         self.assertEqual(existing.selectionFilters, ['Features', 'SketchCurves', 'SketchPoints'])
-        self.assertEqual(existing.getSelectionLimits()[1:], (0, 1))
+        self.assertEqual(existing.getSelectionLimits()[1:], (0, 0))
         self.assertEqual(existing.selectionCount, 0)
 
 
