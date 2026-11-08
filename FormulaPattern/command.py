@@ -875,6 +875,12 @@ class Dialog:
         if self.editing is not None and record.id == self.editing.id:
             self._restore_highlight()     # a copy of the loaded pattern: keep the user's changes
             return
+        if self.active_sketch is not None and record.kind == 'features':
+            # see list_patterns: the design's patterns are not edited from inside a sketch
+            self.last_error = ('Finish the sketch first: a pattern of bodies, faces, features or '
+                               'components is edited from the SOLID tab')
+            self._restore_highlight()
+            return
         self.choose_pattern(record)
 
     def _restore_highlight(self):
@@ -1175,7 +1181,9 @@ class Dialog:
             if kind in ('Bodies', OBJECT_PROFILES) and self.scale_point_entity is None:
                 return 'Size needs a point to scale about'
             if self.size_kind == engine.SIZE_DIAMETER:
-                if not all(_type_name(_native(e)) == 'SketchCircle' for e in self.selected_objects()):
+                kinds = [_type_name(_native(e)) for e in self.selected_objects()]
+                # a window selection takes the circles' centre points too; they just ride along
+                if 'SketchCircle' not in kinds or any(k not in ('SketchCircle', 'SketchPoint') for k in kinds):
                     return 'Diameter needs sketch circles'
         if kind == OBJECT_PROFILES:
             if not self.depth_text:
@@ -1322,6 +1330,11 @@ class Dialog:
                 pattern_input = features.createInput(
                     entities, reference, two, distance,
                     adsk.fusion.PatternDistanceType.ExtentPatternDistanceType)
+                # Fusion starts the input with the UI's default of 3 instances in the second
+                # direction, on top of each other without a direction (seen 2026-11-08: a
+                # pattern of a body made 5 bodies per copy). One row only.
+                pattern_input.quantityTwo = adsk.core.ValueInput.createByReal(1.0)
+                pattern_input.distanceTwo = adsk.core.ValueInput.createByReal(1.0)   # unused with one row
             pattern_input.patternComputeOption = compute
             feature = features.add(pattern_input)
             if feature is None:
@@ -1965,17 +1978,33 @@ def find_pattern(design, entity, known=()) -> PatternRecord:
 
 
 def list_patterns(design, sketch=None) -> list:
-    """Every saved pattern in the design, in timeline order, plus the sketch patterns of
-    ``sketch``, the sketch being edited. Sketch patterns of other sketches are left out: their
-    copies can only be replaced inside their own sketch (seen in Fusion 2026-11-08: deleting
-    them from outside did nothing, so the rebuilt copies landed on top of the old ones).
-    Finds them through Design.findAttributes and, in case that misses some, by walking the
-    timeline and the sketch's constraints."""
+    """The saved patterns the dialog can edit now, in timeline order.
+
+    Outside a sketch (``sketch`` is None): every pattern of bodies, faces, features or
+    components in the design. Inside a sketch: only that sketch's own patterns. Sketch
+    patterns of other sketches cannot be replaced from outside (seen in Fusion 2026-11-08:
+    deleting their copies did nothing, so the rebuilt copies landed on top of the old ones),
+    and editing a sketch rolls the timeline back to it, so the design's patterns after the
+    sketch are rolled back there (a component pattern's occurrences then have no attributes
+    at all) and replacing one before it would roll the timeline back past the open sketch.
+    Finds the patterns through Design.findAttributes and, in case that misses some, by
+    walking the timeline or the sketch's constraints."""
     copies = {}                                   # pattern id → its copies
-    for a in _find_attributes(design):
+    attributes = _find_attributes(design)
+    orphans = 0
+    for a in attributes:
         if a.value and a.parent is not None:
             copies.setdefault(a.value, []).append(a.parent)
+        elif a.value:
+            orphans += 1
     candidates = list(_timeline_entities(design))
+    try:
+        timeline = design.timeline
+        _log(f'list_patterns: {len(attributes)} attributes ({orphans} without a parent), '
+             f'{len(candidates)} timeline entities, marker {timeline.markerPosition} of {timeline.count}, '
+             f'sketch={sketch.name if sketch is not None else None}')
+    except Exception:
+        pass
     if sketch is not None:
         try:
             candidates += list(sketch.geometricConstraints)
@@ -1986,9 +2015,14 @@ def list_patterns(design, sketch=None) -> list:
         if pattern_id:
             copies.setdefault(pattern_id, []).append(entity)
     records = [_record(pattern_id, _distinct(items)) for pattern_id, items in copies.items()]
-    records = [r for r in records
-               if r.kind not in ('sketch', 'sketch_copies') or _same_sketch(_sketch_of(r), sketch)]
+    if sketch is None:
+        records = [r for r in records if r.kind not in ('sketch', 'sketch_copies')]
+    else:
+        records = [r for r in records
+                   if r.kind in ('sketch', 'sketch_copies') and _same_sketch(_sketch_of(r), sketch)]
     records.sort(key=lambda r: (r.position, r.label))
+    _log('  patterns: ' + ', '.join(f'{r.label} [{r.kind}, {_type_name(r.copies[0])}, at {r.position}]'
+                                    for r in records))
     seen = set()
     for record in records:                        # the drop-down needs distinct labels
         base, k = record.label, 2

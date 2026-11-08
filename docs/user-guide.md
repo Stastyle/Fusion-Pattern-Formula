@@ -180,7 +180,8 @@ write two formulas of your own.
 ### 3.7 Test holes that grow (diameter)
 
 In a sketch, draw one circle. **Formula Pattern**: *Object type* **Sketch
-curves**, click the circle, *Copies* `10`, formula `a * i` with `a = 8 mm`.
+curves**, click the circle (a window selection that also takes its centre
+point is fine), *Copies* `10`, formula `a * i` with `a = 8 mm`.
 Open **Vary each copy**, type `a + 0.1 * i` into **Size** and choose
 **Diameter (circles)**. Every copy is a circle 0.1 mm wider than the one
 before, in a row 8 mm apart: extrude them all as a cut for a tolerance
@@ -363,10 +364,12 @@ you made earlier:
 1. Run Formula Pattern.
 2. At the top of the dialog, under **Edit a saved pattern**, open the
    **Saved pattern** list. It names every pattern in the design by its
-   timeline group and number of copies, for example *Frets (12 copies)*;
-   while you edit a sketch it also lists that sketch's patterns, as
-   *Fretboard sketch pattern (3 copies)* (a sketch pattern is only offered
-   inside its own sketch, where its copies can be replaced). Pick one.
+   timeline group and number of copies, for example *Frets (12 copies)*.
+   While you edit a sketch it lists that sketch's patterns instead, as
+   *Fretboard sketch pattern (3 copies)*: a sketch pattern is only offered
+   inside its own sketch, where its copies can be replaced, and the
+   design's other patterns are edited from the SOLID tab, because editing
+   a sketch rolls the timeline back to it. Pick one.
 3. The pattern's copies light up in the model and the timeline, the dialog
    fills itself with its type, objects, direction or axis, copies, preset,
    formula, `a b c` and flip, and a line under the list says *Editing Frets
@@ -434,7 +437,8 @@ are resolved.
 | `Direction 2 must not be parallel to Direction 1` | The two path directions do not span a plane. | Pick another edge or axis for Direction 2. |
 | `Path, Rotation and Size need bodies, components, sketch curves or profiles` | Faces or features cannot be rotated or scaled one by one. | Pattern the body instead, or clear the Rotation / Size fields. |
 | `Size does not apply to components` | An occurrence cannot be scaled. | Clear Size, or pattern the bodies. |
-| `Diameter needs sketch circles` | *Diameter (circles)* was chosen with other curves selected. | Select circles only, or choose *Scale factor*. |
+| `Diameter needs sketch circles` | *Diameter (circles)* was chosen with no circle selected, or with curves other than circles (centre points are fine). | Select circles, or choose *Scale factor*. |
+| `Finish the sketch first: a pattern of bodies, faces, features or components is edited from the SOLID tab` | A copy of such a pattern was clicked into *Copies* while a sketch is being edited. | Finish the sketch, then pick that pattern from the SOLID tab. |
 | `Profiles need a Depth formula` | *Object type* is Profiles and Depth is empty. | Type a depth formula (a constant such as `a` is fine). |
 | `⚠ …` | A warning; the pattern is still built. | Duplicate positions, for example. |
 | `Select the objects …` / `Select the centre point …` | Something is not selected yet. | Select it. |

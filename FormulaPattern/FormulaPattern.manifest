@@ -6,7 +6,7 @@
     "description": {
         "": "Linear, circular or path pattern where formulas decide the position, rotation, size and depth of every copy: guitar frets, growing gaps, spirals, sunflower layouts, diffusers and your own formulas."
     },
-    "version": "1.2.1",
+    "version": "1.2.2",
     "runOnStartup": true,
     "supportedOS": "windows|mac",
     "editEnabled": true

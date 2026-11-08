@@ -1,5 +1,34 @@
 # Changelog
 
+## 1.2.2 — 2026-11-08
+
+Found while checking every remaining mode combination in Fusion, with the
+resulting geometry compared to the expected numbers:
+
+* **Linear patterns made five bodies per copy instead of one.** Fusion
+  starts a `RectangularPatternFeatureInput` with the UI's default of three
+  instances in the second direction and no second direction, so the extra
+  instances sat on top of each other (4 copies of a louvre made 20 bodies,
+  invisible as duplicates). The add-in now asks for one row only.
+* Inside a sketch the *Saved pattern* list holds only that sketch's own
+  patterns. Editing a sketch rolls the timeline back to it, so the design's
+  later patterns are rolled back there (a component pattern cannot even be
+  found) and replacing an earlier one would roll the timeline back past the
+  open sketch. Clicking a copy of a design pattern inside a sketch says
+  *Finish the sketch first*.
+* *Diameter (circles)* accepts the circles' centre points in the selection,
+  which a window selection always takes along; only the circles get the
+  diameter.
+
+Verified in Fusion: a native linear pattern of a body converted in place to
+circular, to circular with a rotation about another axis (transform
+engine) and back to native circular and native linear; a Profiles pattern
+on a Path (grid) cut into a block with a depth formula; a sketch Path
+(Archimedean spiral) of a circle with growing diameters; a circular pattern
+of a component with a rotation about the X axis; the refusals for faces,
+features and components; the *Saved pattern* list inside and outside a
+sketch.
+
 ## 1.2.1 — 2026-11-08
 
 Found while testing the rest of 1.2 in Fusion (component copies, the Scale

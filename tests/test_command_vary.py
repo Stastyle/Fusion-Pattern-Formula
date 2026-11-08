@@ -452,6 +452,13 @@ class ValidationMessages(VaryHarness):
         self.select(cmd, C.ID_OBJECTS, sketch.circle('hole'), sketch.circle('hole 2', centre=(1, 1)))
         self.assertFine(cmd)
         self.assertIn('⌀', self.preview_text(cmd))
+        # A window selection in Fusion takes the circles' centre points too (seen 2026-11-08);
+        # points have no diameter and just ride along, so they are fine. Points alone are not.
+        self.select(cmd, C.ID_OBJECTS, sketch.point('centre of hole'))
+        self.assertFine(cmd)
+        cmd.commandInputs.itemById(C.ID_OBJECTS).clearSelection()
+        self.select(cmd, C.ID_OBJECTS, sketch.point('lonely'))
+        self.assertProblem(cmd, 'Diameter needs sketch circles')
 
     def test_profiles_need_a_depth_and_join_or_cut_a_target(self):
         sketch = adsk.fusion.Sketch('Wells', self.root)

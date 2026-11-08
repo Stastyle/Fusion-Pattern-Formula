@@ -159,7 +159,7 @@ The last-used values (not selections) are remembered in
 
 Run Formula Pattern and pick the pattern from the **Saved pattern** list at
 the top of the dialog; it lists every pattern in the design by group name
-and number of copies, plus the sketch patterns of the sketch being edited.
+and number of copies (inside a sketch: that sketch's own patterns).
 Its copies light up in the model and the timeline, the
 dialog loads its objects, direction, formula, values and count, and a line
 under the list says what OK will do. Change anything and press OK to replace

@@ -1,0 +1,11 @@
+{
+    "autodeskProduct": "Fusion360",
+    "type": "script",
+    "id": "9d0a1a1e-6f2b-4f1c-9c3e-0d2f6a7b8c9d",
+    "author": "Formula Pattern tests",
+    "description": {"": "Builds the geometry used to test Formula Pattern 1.2 live."},
+    "version": "1.0.0",
+    "runOnStartup": false,
+    "supportedOS": "windows|mac",
+    "editEnabled": true
+}

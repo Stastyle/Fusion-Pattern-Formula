@@ -395,6 +395,22 @@ class Building(FusionHarness):
         self.assertEqual((groups.item(0).start, groups.item(0).end), (0, 11))
         self.assertEqual(groups.item(0).name, 'Formula Pattern')
 
+    def test_a_linear_pattern_of_a_body_makes_one_body_per_copy(self):
+        # Fusion starts a RectangularPatternFeatureInput with quantityTwo = 3 (seen 2026-11-08:
+        # 4 copies of a louvre made 20 bodies, 3 on every copy and 2 on the original).
+        root = self.design.rootComponent
+        louvre = root.body('Louvre')
+        cmd, dialog = self.open_dialog()
+        self.select(cmd, C.ID_OBJECTS, louvre)
+        self.select(cmd, C.ID_DIRECTION, 'neck edge')
+        cmd.commandInputs.itemById(C.ID_COUNT).value = 4
+        self.changed(cmd, C.ID_COUNT)
+        self.assertTrue(self.preview(cmd).isValidResult, self.preview_text(cmd))
+        self.assertEqual([b.name for b in root.bRepBodies],
+                         ['Louvre', 'Louvre (1)', 'Louvre (2)', 'Louvre (3)', 'Louvre (4)'])
+        first = root.features.rectangularPatternFeatures.item(0).input
+        self.assertEqual(first.quantityTwo.realValue, 1.0, 'one row only')
+
     def test_flip_builds_negative_distances(self):
         cmd, dialog = self.open_dialog()
         self.ready_linear(cmd)
@@ -988,6 +1004,34 @@ class EditingSavedPattern(FusionHarness):
         self.assertIs(cmd.commandInputs.itemById(C.ID_OBJECTS).selection(0).entity, fret)
         self.assertIs(cmd.commandInputs.itemById(C.ID_DIRECTION).selection(0).entity, axis_line)
         self.assertEqual(self.highlighted(cmd), [e for c in constraints for e in c.createdEntities])
+
+    def test_the_designs_patterns_are_not_offered_inside_a_sketch(self):
+        # Editing a sketch rolls the timeline back to the sketch (Fusion 2026-11-08): the
+        # design's patterns after it are rolled back there (a component pattern cannot even
+        # be found), and replacing one before it would roll the timeline back past the open
+        # sketch. So inside a sketch only the sketch's own patterns are offered.
+        old = self.make_linear(count=3, group='Frets')
+        sketch = adsk.fusion.Sketch('Later')
+        fret, axis_line = sketch.line('fret slot'), sketch.line('centre line')
+        self.app.activeEditObject = sketch
+        cmd, dialog = self.open_dialog()
+        self.assertEqual(self.list_names(cmd), ['New pattern'])
+        self.select(cmd, C.ID_OBJECTS, fret)
+        self.select(cmd, C.ID_DIRECTION, axis_line)
+        cmd.commandInputs.itemById(C.ID_COUNT).value = 2
+        self.changed(cmd, C.ID_COUNT)
+        self.assertTrue(self.preview(cmd).isValidResult, self.preview_text(cmd))
+        self.finish(cmd)
+
+        cmd, dialog = self.open_dialog()
+        self.assertEqual(self.list_names(cmd), ['New pattern', 'Later sketch pattern (2 copies)'])
+        self.pick(cmd, 'Later sketch pattern (2 copies)')
+        highlighted = self.highlighted(cmd)
+        self.click_copy(cmd, old[1])          # a copy of the design's pattern: refused, the edit stays
+        self.assertIn('Finish the sketch first', self.preview_text(cmd))
+        self.assertEqual(self.highlighted(cmd), highlighted)
+        self.assertEqual(dialog.object_type, 'Sketch curves')
+        self.assertFalse(self.preview(cmd).isValidResult)
 
     def test_patterns_are_found_from_the_timeline_when_findattributes_fails(self):
         old = self.make_linear(count=3, group='Frets')

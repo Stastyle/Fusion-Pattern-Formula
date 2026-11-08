@@ -447,6 +447,16 @@ class RectangularPatternFeatureInput(core.Base):
         self.patternDistanceType = distance_type
         self.patternComputeOption = PatternComputeOptions.OptimizedPatternCompute
         self.isSymmetricInDirectionOne = False
+        # Fusion starts the input with the UI's default of three instances in the second
+        # direction, and no direction two (seen 2026-11-08: the extra instances sit on top of
+        # the others, so a pattern of a body made 5 bodies per copy instead of 1).
+        self.directionTwoEntity = None
+        self.quantityTwo = core.ValueInput.createByReal(3.0)
+        self.distanceTwo = None
+        self.isSymmetricInDirectionTwo = False
+
+    def _instances(self):
+        return int(self.quantityOne.realValue) * int(self.quantityTwo.realValue)
 
 
 class CircularPatternFeatureInput(core.Base):
@@ -458,12 +468,40 @@ class CircularPatternFeatureInput(core.Base):
         self.isSymmetric = False
         self.patternComputeOption = PatternComputeOptions.OptimizedPatternCompute
 
+    def _instances(self):
+        return int(self.quantity.realValue)
+
+
+class PatternFeature(Feature):
+    """A native pattern feature: makes (instances - 1) bodies for every body it patterns,
+    named like Fusion names them; deleting the feature deletes them again. The fake does
+    not compute positions."""
+
+    def __init__(self, collection, pattern_input):
+        super().__init__(collection, pattern_input)
+        component = collection._component
+        try:
+            sources = [e for e in pattern_input.inputEntities if isinstance(e, BRepBody)]
+        except TypeError:
+            sources = []
+        if component is not None:
+            for source in sources:
+                for _ in range(pattern_input._instances() - 1):
+                    component._pattern_copies = getattr(component, '_pattern_copies', 0) + 1
+                    self._bodies.append(component._new_body(f'{source.name} ({component._pattern_copies})',
+                                                            origin=source._origin))
+
+    def _undo(self):
+        for body in self._bodies:
+            if not body._deleted:
+                body.deleteMe()
+
 
 class _PatternFeatures(_FeatureCollection):
     def add(self, pattern_input):
         if self._failing():
             return None
-        return self._insert(Feature(self, pattern_input))
+        return self._insert(PatternFeature(self, pattern_input))
 
 
 class RectangularPatternFeatures(_PatternFeatures):

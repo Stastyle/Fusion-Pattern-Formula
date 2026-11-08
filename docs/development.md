@@ -293,6 +293,32 @@ each of them; the fake models them this way):
     (or another one) was being edited, so an edit built the new copies on
     top of the old ones. `list_patterns()` offers a sketch pattern only
     while its own sketch is being edited.
+25. **`RectangularPatternFeatureInput` starts with `quantityTwo = 3`** (the
+    UI's default) and no second direction, so a pattern of a body made 5
+    bodies per copy, 3 on the copy and 2 on the original, all coincident
+    and invisible (seen 2026-11-08). `_build_features()` sets
+    `quantityTwo = 1`, as the sketch pattern input already did.
+26. **Editing a sketch rolls the timeline back to the sketch** (the marker
+    sat at the sketch while the dialog was open inside it). The design's
+    patterns after the sketch are rolled back there: their features were
+    still found, and an edit even rebuilt them in the rolled-back region,
+    invisibly; a rolled-back occurrence's attributes come back with
+    `parent = None`, so a component pattern cannot be found at all. And
+    replacing a pattern from before the sketch would roll the marker back
+    past the open sketch. So `list_patterns()` offers only the sketch's own
+    patterns inside a sketch, and `on_existing_changed()` refuses a clicked
+    copy of a design pattern there.
+27. **A window selection in a sketch takes the circles' centre points too**
+    (a left-drag in the viewport while a selection input is active), so
+    `_problem()` lets sketch points through for *Diameter (circles)*; the
+    build only sets the radius of circles anyway.
+28. `tools/fusion-scripts/` holds the two scripts used for the live checks:
+    `FPTestGeometry` makes the test design (block with a profile, peg,
+    louvre, sketches, a component, a tilted sketch) and `FPInspect` dumps
+    the timeline, every body's bounding box and volume, every occurrence's
+    transform and every sketch's circles to `~/.fusion_fp_inspect.txt`, to
+    compare with the expected transforms. Copy a folder into Fusion's
+    `API/Scripts` folder and run it from Shift+S.
 
 **Diagnostics log.** `command.py` appends what the edit path does to
 `~/.fusion_formula_pattern.log` (emptied when the add-in starts): the
