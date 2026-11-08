@@ -339,7 +339,8 @@ instead of a native pattern feature:
 
 * **Bodies**: a *Copy* feature (the native copy/paste body), then a *Scale*
   feature when Size is set, then a *Move* feature that rotates and moves
-  the copy into place.
+  the copy into place. The copies are named after the original with their
+  copy number: *Peg (1)*, *Peg (2)* …
 * **Components**: one new occurrence of the component per copy, placed by
   its transform.
 * **Profiles**: an *Extrude* of the profile by the copy's depth, then
@@ -364,7 +365,8 @@ you made earlier:
    **Saved pattern** list. It names every pattern in the design by its
    timeline group and number of copies, for example *Frets (12 copies)*;
    while you edit a sketch it also lists that sketch's patterns, as
-   *Fretboard sketch pattern (3 copies)*. Pick one.
+   *Fretboard sketch pattern (3 copies)* (a sketch pattern is only offered
+   inside its own sketch, where its copies can be replaced). Pick one.
 3. The pattern's copies light up in the model and the timeline, the dialog
    fills itself with its type, objects, direction or axis, copies, preset,
    formula, `a b c` and flip, and a line under the list says *Editing Frets

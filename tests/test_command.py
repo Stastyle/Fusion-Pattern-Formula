@@ -974,6 +974,12 @@ class EditingSavedPattern(FusionHarness):
         self.finish(cmd)
         constraints = list(sketch.geometricConstraints.created)
 
+        self.app.activeEditObject = None                 # not listed outside its sketch
+        cmd, dialog = self.open_dialog()
+        self.assertEqual(self.list_names(cmd), ['New pattern'])
+        cmd.destroy.fire(adsk.core.CommandEventArgs(cmd, adsk.core.CommandTerminationReason.CancelledTerminationReason))
+
+        self.app.activeEditObject = sketch
         cmd, dialog = self.open_dialog()
         self.assertEqual(self.list_names(cmd), ['New pattern', 'Fretboard sketch pattern (3 copies)'])
         self.pick(cmd, 'Fretboard sketch pattern (3 copies)')

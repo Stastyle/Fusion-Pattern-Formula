@@ -1,5 +1,28 @@
 # Changelog
 
+## 1.2.1 — 2026-11-08
+
+Found while testing the rest of 1.2 in Fusion (component copies, the Scale
+feature, sketch copies on a tilted sketch, *Join* and *New body*):
+
+* Editing a component pattern failed with `InternalValidationError :
+  findObjectPath`: an occurrence cannot be deleted while the timeline is
+  rolled back to before it. The old occurrences are now deleted with the
+  marker just after them, and the new ones are still built in their place.
+* Copies of bodies are named after the original with their copy number
+  (`Peg (1)`, `Peg (2)` …) instead of Fusion's `Peg (1) (1)`.
+* A sketch pattern made by the transform engine was listed in the *Saved
+  pattern* list outside its sketch, where OK could not delete the old
+  copies and built the new ones on top of them. Sketch patterns are listed
+  only while their own sketch is being edited, as in 1.1.
+
+Verified in Fusion: a Path (grid) pattern of a component with a rotation
+formula, rebuilt in place with more copies; a linear pattern of a body
+with a growing scale factor, rebuilt with fewer copies; copies of a circle
+and a rectangle on a sketch tilted 30° with rotation and scale about a
+sketch point; a Profiles pattern joined into a block and then changed to
+new bodies.
+
 ## 1.2.0 — 2026-11-08
 
 * *Path* pattern type: two formulas give every copy's offset in a plane,

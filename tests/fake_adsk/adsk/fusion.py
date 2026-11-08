@@ -973,6 +973,14 @@ class Occurrence(core.Base):
     def deleteMe(self):
         if self._deleted:
             raise RuntimeError('3 : InternalValidationError : deleted')
+        # Seen in Fusion 2026-11-08: an occurrence whose row is after the marker does not exist
+        # in the current state and cannot be deleted (a rolled-back feature can be).
+        tl = self.timelineObject
+        if tl is not None:
+            group = tl.parentGroup
+            position = group.index if group is not None and group.isCollapsed else tl.index
+            if tl._timeline.markerPosition <= position:
+                raise RuntimeError('2 : InternalValidationError : Xl::Utils::findObjectPath(this, objPath)')
         self._deleted = True
         if self._collection is not None and self in self._collection._items:
             self._collection._items.remove(self)

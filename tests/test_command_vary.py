@@ -509,6 +509,18 @@ class BuildingBodies(VaryHarness):
     def new_bodies(self):
         return [b for b in self.root.bRepBodies if b is not self.block]
 
+    def test_copied_bodies_are_named_after_the_original_with_their_copy_number(self):
+        # Fusion's own names for pasted bodies come out as 'Peg (1)', 'Peg (1) (1)', 'Peg (2)' …
+        cmd, dialog = self.open_dialog()
+        self.choose(cmd, C.ID_TYPE, 'Path')
+        self.select(cmd, C.ID_OBJECTS, self.block)
+        self.select(cmd, C.ID_DIRECTION, self.x_edge)
+        self.select(cmd, C.ID_DIRECTION2, self.y_edge)
+        self.set_text(cmd, C.ID_FORMULA2, '5 * i')
+        self.set_count(cmd, 3)
+        self.assertTrue(self.preview(cmd).isValidResult, self.preview_text(cmd))
+        self.assertEqual([b.name for b in self.new_bodies()], ['Block (1)', 'Block (2)', 'Block (3)'])
+
     def test_path_pattern_copies_the_body_and_moves_each_copy_along_both_directions(self):
         # "X" is the model Y axis here and Direction 2 is tilted: it is made perpendicular to X.
         along_y = self.edge('along y', (3, 3, 0), (3, 5, 0))
@@ -1166,6 +1178,7 @@ class EditingTransformedPatterns(VaryHarness):
         self.assertTrue(self.preview(cmd).isValidResult, self.preview_text(cmd))
         self.finish(cmd)
         old = [self.root.occurrences.item(1), self.root.occurrences.item(2)]
+        self.design.add_component('Axle', 'Axle:1')     # something after the pattern
 
         cmd, dialog = self.open_dialog()
         self.assertEqual(self.list_names(cmd), ['New pattern', 'Formula Pattern (2 copies)'])
@@ -1177,8 +1190,10 @@ class EditingTransformedPatterns(VaryHarness):
         self.set_count(cmd, 3)
         self.assertTrue(self.preview(cmd).isValidResult, self.preview_text(cmd))
         self.assertTrue(all(o._deleted for o in old))
-        self.assertEqual(self.root.occurrences.count, 4)
-        self.assertEqual(self.design.timeline.names(), ['Wheel:1', ['Wheel:4', 'Wheel:5', 'Wheel:6']])
+        self.assertEqual(self.root.occurrences.count, 5)
+        self.assertEqual(self.design.timeline.names(),
+                         ['Wheel:1', ['Wheel:4', 'Wheel:5', 'Wheel:6'], 'Axle:1'], 'rebuilt in place')
+        self.assertEqual(self.design.timeline.markerPosition, self.design.timeline.count)
         self.assertFalse(original._deleted)
 
     def test_a_profiles_pattern_loads_its_target_and_rebuilds_the_cut(self):
@@ -1262,6 +1277,33 @@ class EditingTransformedPatterns(VaryHarness):
         self.pick(cmd, 'Holes sketch pattern (3 copies)')
         self.select(cmd, C.ID_EXISTING, new[1])
         self.assertEqual(len(self.highlighted(cmd)), 3)
+
+    def test_a_sketch_copies_pattern_is_listed_only_while_its_sketch_is_edited(self):
+        # Outside the sketch its copies cannot be deleted (seen in Fusion 2026-11-08: OK left
+        # the old copies behind and built the new ones on top), so it is not offered there.
+        sketch = adsk.fusion.Sketch('Holes')
+        hole = sketch.circle('hole', centre=(0, 0), radius=0.2)
+        self.app.activeEditObject = sketch
+        cmd, dialog = self.open_dialog()
+        self.choose(cmd, C.ID_TYPE, 'Path')
+        self.select(cmd, C.ID_OBJECTS, hole)
+        self.set_text(cmd, C.ID_FORMULA2, '5 * i')
+        self.set_count(cmd, 2)
+        self.assertTrue(self.preview(cmd).isValidResult, self.preview_text(cmd))
+        self.finish(cmd)
+
+        cancelled = adsk.core.CommandTerminationReason.CancelledTerminationReason
+        self.app.activeEditObject = None                 # back in the solid environment
+        cmd, dialog = self.open_dialog()
+        self.assertEqual(self.list_names(cmd), ['New pattern'])
+        cmd.destroy.fire(adsk.core.CommandEventArgs(cmd, cancelled))
+        self.app.activeEditObject = adsk.fusion.Sketch('Other')
+        cmd, dialog = self.open_dialog()
+        self.assertEqual(self.list_names(cmd), ['New pattern'])
+        cmd.destroy.fire(adsk.core.CommandEventArgs(cmd, cancelled))
+        self.app.activeEditObject = sketch
+        cmd, dialog = self.open_dialog()
+        self.assertEqual(self.list_names(cmd), ['New pattern', 'Holes sketch pattern (2 copies)'])
 
     def test_a_feature_whose_timeline_row_cannot_be_asked_is_found_by_scanning_the_timeline(self):
         self.make_native_linear(count=2)

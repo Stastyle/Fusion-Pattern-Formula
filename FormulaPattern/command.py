@@ -1258,9 +1258,25 @@ class Dialog:
         self._marker_before = timeline.markerPosition
         self._marker_was_at_end = timeline.markerPosition >= timeline.count
         copies = self._live_copies(record)
-        timeline.markerPosition = min(_timeline_index(f) for f in copies)
+        indexes = [_timeline_index(f) for f in copies]
+        if any(_type_name(f) == 'Occurrence' for f in copies):
+            # An occurrence only exists in the current state of the design: rolled back to
+            # before it, deleteMe raises "InternalValidationError : findObjectPath" (Fusion
+            # 2026-11-08). So the marker goes just after the copies instead; deleting them
+            # then leaves it where they were, which is where the rebuilt ones go.
+            position = max(indexes) + 1
+        else:
+            position = min(indexes)
+        _log(f'  removing {len(copies)} copies of {record.label}: marker {timeline.markerPosition} -> {position}'
+             f' of {timeline.count}')
+        timeline.markerPosition = position
         for feature in reversed(copies):             # sorted by copy number, discovery order within
-            feature.deleteMe()
+            try:
+                feature.deleteMe()
+            except Exception as e:
+                _log(f'  deleting {_describe(feature)} failed: {e!r}')
+                raise
+        _log(f'  removed; marker now {timeline.markerPosition} of {timeline.count}')
 
     def _live_copies(self, record) -> list:
         """The pattern's features as the timeline holds them now. The wrappers a record was
@@ -1404,13 +1420,16 @@ class Dialog:
         """
         items = list(entities)
         settings_json = json.dumps(self.collect_settings(with_tokens=True))
+        _log('  settings collected')
         if self.sketch_mode:
             return self._build_sketch_copies(spec, result, items, reference, settings_json)
         component = self.design.activeComponent
         timeline = self.design.timeline
         start_index = timeline.markerPosition
         group_name, n, kind = self.group_name, result.count, self.object_type
+        _log(f'  building {n} {kind} copies at marker {start_index} of {timeline.count}')
         matrices = self._solid_transforms(spec, result, reference)
+        _log('  transforms computed')
         sizes = result.sizes or [None] * n
         depth_sign = self._depth_direction(items) if kind == OBJECT_PROFILES else 1
         created, tools = [], []
@@ -1504,7 +1523,15 @@ class Dialog:
         feature = component.features.copyPasteBodies.add(adsk.core.ObjectCollection.createWithArray(items))
         if feature is None:
             raise self._creation_failed(spec, result, k)
-        return [feature], _items(feature.bodies)
+        bodies = _items(feature.bodies)
+        if len(bodies) == len(items):
+            # Fusion names pasted bodies 'Peg (1)', 'Peg (1) (1)', 'Peg (2)' …; name them by copy.
+            for source, body in zip(items, bodies):
+                try:
+                    body.name = f'{source.name} ({k})'
+                except Exception:
+                    pass
+        return [feature], bodies
 
     def _depth_direction(self, profiles) -> int:
         """Which way a positive depth goes: +1 along the profile's normal, -1 against it.
@@ -1572,9 +1599,25 @@ class Dialog:
 
     def _place_occurrences(self, component, items, cells, spec, result, k) -> list:
         made = []
+        timeline = self.design.timeline
         for occurrence in items:
-            transform = placement.multiply(cells, placement.from_matrix3d(occurrence.transform2))
-            new = component.occurrences.addExistingComponent(occurrence.component, placement.to_matrix3d(transform))
+            try:
+                own = placement.from_matrix3d(occurrence.transform2)
+            except Exception as e:
+                _log(f'  copy {k}: transform2 of {_describe(occurrence)} failed: {e!r}')
+                raise
+            transform = placement.multiply(cells, own)
+            try:
+                source = occurrence.component
+            except Exception as e:
+                _log(f'  copy {k}: component of {_describe(occurrence)} failed: {e!r}')
+                raise
+            try:
+                new = component.occurrences.addExistingComponent(source, placement.to_matrix3d(transform))
+            except Exception as e:
+                _log(f'  copy {k}: addExistingComponent({_describe(source)}) with the marker at '
+                     f'{timeline.markerPosition}/{timeline.count} failed: {e!r}')
+                raise
             if new is None:
                 raise self._creation_failed(spec, result, k)
             made.append(new)
@@ -1922,9 +1965,12 @@ def find_pattern(design, entity, known=()) -> PatternRecord:
 
 
 def list_patterns(design, sketch=None) -> list:
-    """Every saved pattern in the design, in timeline order (plus the sketch patterns of
-    ``sketch``, the sketch being edited). Finds them through Design.findAttributes and, in
-    case that misses some, by walking the timeline and the sketch's constraints."""
+    """Every saved pattern in the design, in timeline order, plus the sketch patterns of
+    ``sketch``, the sketch being edited. Sketch patterns of other sketches are left out: their
+    copies can only be replaced inside their own sketch (seen in Fusion 2026-11-08: deleting
+    them from outside did nothing, so the rebuilt copies landed on top of the old ones).
+    Finds them through Design.findAttributes and, in case that misses some, by walking the
+    timeline and the sketch's constraints."""
     copies = {}                                   # pattern id → its copies
     for a in _find_attributes(design):
         if a.value and a.parent is not None:
@@ -1940,6 +1986,8 @@ def list_patterns(design, sketch=None) -> list:
         if pattern_id:
             copies.setdefault(pattern_id, []).append(entity)
     records = [_record(pattern_id, _distinct(items)) for pattern_id, items in copies.items()]
+    records = [r for r in records
+               if r.kind not in ('sketch', 'sketch_copies') or _same_sketch(_sketch_of(r), sketch)]
     records.sort(key=lambda r: (r.position, r.label))
     seen = set()
     for record in records:                        # the drop-down needs distinct labels
@@ -1949,6 +1997,14 @@ def list_patterns(design, sketch=None) -> list:
             k += 1
         seen.add(record.label)
     return records
+
+
+def _sketch_of(record):
+    """The sketch a sketch pattern lives in (None when it cannot be asked)."""
+    try:
+        return record.copies[0].parentSketch
+    except Exception:
+        return None
 
 
 def _record(pattern_id, copies) -> PatternRecord:

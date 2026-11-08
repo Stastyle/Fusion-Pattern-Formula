@@ -717,6 +717,30 @@ class Occurrences(FakeCase):
         with self.assertRaises(RuntimeError):
             occurrence.deleteMe()
 
+    def test_an_occurrence_after_the_marker_cannot_be_deleted(self):
+        self.features.otherFeatures.add('Base')
+        wheel = fusion.Component('Wheel', self.timeline)
+        occurrence = self.root.occurrences.addExistingComponent(wheel, core.Matrix3D.create())
+        self.timeline.markerPosition = 1                 # before the occurrence: it does not exist yet
+        with self.assertRaisesRegex(RuntimeError, 'findObjectPath'):
+            occurrence.deleteMe()
+        self.assertFalse(occurrence._deleted)
+        self.timeline.markerPosition = 2                 # after it: it does
+        self.assertTrue(occurrence.deleteMe())
+        self.assertEqual(self.timeline.names(), ['Base'])
+
+    def test_an_occurrence_in_a_collapsed_group_after_the_marker_cannot_be_deleted_either(self):
+        self.features.otherFeatures.add('Base')
+        wheel = fusion.Component('Wheel', self.timeline)
+        first = self.root.occurrences.addExistingComponent(wheel, core.Matrix3D.create())
+        self.root.occurrences.addExistingComponent(wheel, core.Matrix3D.create())
+        self.timeline.timelineGroups.add(1, 2)
+        self.timeline.markerPosition = 1                 # before the group
+        with self.assertRaisesRegex(RuntimeError, 'findObjectPath'):
+            first.deleteMe()
+        self.timeline.markerPosition = 2                 # after the (collapsed) group
+        self.assertTrue(first.deleteMe())
+
     def test_occurrences_can_be_grouped_with_features_in_the_timeline(self):
         self.features.otherFeatures.add('Base')
         wheel = fusion.Component('Wheel', self.timeline)

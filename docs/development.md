@@ -243,9 +243,11 @@ each of them; the fake models them this way):
     rotation + translation matrix) places body copies exactly; a native
     pattern of the same bodies is replaced in place by Copy / Move pairs
     when a Rotation formula is added to it. **`ExtrudeFeatures` (new body)
-    → Move → one `CombineFeatures` cut** makes the wells. Components
-    (`addExistingComponent`) and Scale features are covered by the fake
-    only; not yet exercised live.
+    → Move → one `CombineFeatures` cut** makes the wells, and *Join* /
+    *New body* work the same way. **`Occurrences.addExistingComponent`**
+    (one occurrence per copy, placed by `M_i · transform2`) and
+    **`ScaleFeatures`** (about a point, before the Move) were verified live
+    as well.
 17. **`Profile.areaProperties().centroid` is in sketch coordinates** (the
     reference says "relative to the sketch origin"): a profile on a face
     10 mm up came back with z = 0. `_profile_in_model_space()` converts it
@@ -266,8 +268,9 @@ each of them; the fake models them this way):
     mode; the second path formula is *Second formula* and a bold line in
     the notes box says what the two mean.
 20. **`Sketch.copy(entities, Matrix3D)` takes the matrix in sketch
-    coordinates** (verified on a sketch on the XY plane, where sketch and
-    model space coincide; a sketch on a face is still to be checked) and
+    coordinates** (verified on the XY plane and on a sketch on a
+    construction plane tilted 30° about X, with a rotation + translation
+    matrix; `Sketch.scale` about a sketch point works on the copies too) and
     **`SketchCircle.radius` is settable on the copies** (they carry no
     constraints).
 21. Driving Fusion for these tests: single-click a text field, `ctrl+a`,
@@ -276,6 +279,20 @@ each of them; the fake models them this way):
     shortcuts (an *Align* dialog opened and terminated the command). The
     command search palette and the moment a dialog closes register as a
     "Chrome" window to the computer-use gate; the toolbar button works.
+22. **An occurrence cannot be deleted while the timeline is rolled back to
+    before it**: `Occurrence.deleteMe()` raised `InternalValidationError :
+    Xl::Utils::findObjectPath(this, objPath)` (a rolled-back feature can be
+    deleted). `_remove_existing()` therefore puts the marker just *after* a
+    pattern's occurrences before deleting them; the marker then lands where
+    they were, and `addExistingComponent` does work with the marker rolled
+    back, so the rebuilt occurrences take the old place in the timeline.
+23. **Pasted bodies get Fusion's own names** (`Peg (1)`, `Peg (1) (1)`,
+    `Peg (2)` …); `_copy_bodies()` renames each copy `<original> (k)`.
+24. **Sketch entities are not deleted from outside their sketch**:
+    `deleteMe()` on the engine's sketch copies did nothing while no sketch
+    (or another one) was being edited, so an edit built the new copies on
+    top of the old ones. `list_patterns()` offers a sketch pattern only
+    while its own sketch is being edited.
 
 **Diagnostics log.** `command.py` appends what the edit path does to
 `~/.fusion_formula_pattern.log` (emptied when the add-in starts): the
