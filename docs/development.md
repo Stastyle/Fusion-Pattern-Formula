@@ -10,12 +10,15 @@ FormulaPattern/                 the add-in (linked or copied into Fusion's AddIn
   FormulaPattern.manifest       id, version, run-on-startup
   FormulaPattern.py             run()/stop() entry; reloads the modules on every Run
   command.py                    Fusion side: toolbar buttons, dialog, events, building the result
+  placement.py                  Fusion side: vectors from entities, 4×4 matrices for the transform engine
   engine.py                     pure Python: formula evaluator, positions, presets, preview text
   settings.py                   last-used settings in ~/.fusion_formula_pattern.json
   resources/FormulaPattern/     16x16, 32x32, 64x64 button icons
 tests/
   fake_adsk/adsk/               a small fake of adsk.core / adsk.fusion
   test_engine.py                engine tests (plain Python)
+  test_placement.py             matrix and entity-geometry tests against the fake
+  test_fake_adsk.py             tests of the fake itself (its maths and feature behaviour)
   test_command.py               dialog, toolbar and build tests against the fake
 docs/
   user-guide.md                 for users
@@ -80,8 +83,28 @@ position / gap mode, flip and the 360° wrap, and reports errors per copy.
   `is_valid()`; executePreview → `build()` with `isValidResult = True`;
   execute → `build()`; destroy → save settings.
 
-The design document explains the decisions behind this:
-`docs/superpowers/specs/2026-11-06-formula-pattern-design.md`.
+* The transform engine (1.2): `build()` goes to `_build_transformed()`
+  whenever the pattern type is Path, a Rotation or Size formula is set, or
+  the object type is Profiles. Every copy gets a rigid transform
+  `M_i = P_i · R_i` (own rotation about the rotation axis, then the
+  pattern placement: translation along the direction, rotation about the
+  pattern axis, or `x·u + y·v` between the two path directions) built from
+  plain 16-cell lists in `placement.py` and handed to Fusion as a
+  `Matrix3D` only at the end. Bodies: CopyPasteBody → (Scale) → Move
+  (`defineAsFreeMove`); components: `addExistingComponent` with
+  `M_i · transform2`; profiles: Extrude (new body, signed depth) → (Scale)
+  → Move, then one Combine for Join / Cut; sketch curves: `Sketch.copy`
+  with the matrix in sketch space, then `radius` (Diameter) or
+  `Sketch.scale`. Size cannot go into the Move matrix (Fusion rejects a
+  scaling matrix), hence the separate Scale feature. The features carry the
+  same attributes as native patterns; bodies and sketch copies made this
+  way carry `member` = pattern id, and the settings JSON stored on the
+  copies holds the `entityToken`s of every selection (`tokens`), which
+  `read_inputs()` resolves with `Design.findEntityByToken` when editing.
+
+The design documents explain the decisions behind this:
+`docs/superpowers/specs/2026-11-06-formula-pattern-design.md` and
+`docs/superpowers/specs/2026-11-08-path-and-vary-design.md`.
 
 ## Running the tests
 
@@ -210,6 +233,49 @@ the diagnostics log on; the fake models them this way):
     reports itself (`_restore_highlight()` puts the Copies input back).
     Sketch editing was exercised end to end: 3 copies to 2, old copies
     gone, switching patterns by clicking a copy of the other one.
+
+The transform engine (1.2; seen in Fusion on 2026-11-08 while building a
+sunflower path of 40 bodies, a linear pattern of bodies with rotation, a
+Profiles + Cut pattern and a sketch pattern with diameters, and editing
+each of them; the fake models them this way):
+
+16. **`CopyPasteBodies.add` + `MoveFeatures` with `defineAsFreeMove`** (a
+    rotation + translation matrix) places body copies exactly; a native
+    pattern of the same bodies is replaced in place by Copy / Move pairs
+    when a Rotation formula is added to it. **`ExtrudeFeatures` (new body)
+    → Move → one `CombineFeatures` cut** makes the wells. Components
+    (`addExistingComponent`) and Scale features are covered by the fake
+    only; not yet exercised live.
+17. **`Profile.areaProperties().centroid` is in sketch coordinates** (the
+    reference says "relative to the sketch origin"): a profile on a face
+    10 mm up came back with z = 0. `_profile_in_model_space()` converts it
+    with `Sketch.sketchToModelSpace` and takes the normal as
+    `xDirection × yDirection` (model space; also the direction a positive
+    extrude takes). `_depth_direction()` then probes a point 0.2 mm on
+    each side with `BRepBody.pointContainment` to send a *Cut* into the
+    target and a *Join* away from it.
+18. **The feature wrappers a `PatternRecord` was made with can go stale
+    between loading and rebuilding**: at build time the pattern's
+    `RectangularPatternFeature`s had no name and no `timelineObject`, so
+    `_timeline_index()` could not place them. `_live_copies()` looks the
+    copies up again by their `pattern` attribute (`_timeline_entities`)
+    right before deleting them; `_timeline_index()` also collapses an
+    expanded group and scans the timeline rows as fallbacks.
+19. **`CommandInput.name` and `Occurrence.name` are read-only**, so the
+    dialog cannot relabel *Formula* / *Direction* / *Rotation axis* per
+    mode; the second path formula is *Second formula* and a bold line in
+    the notes box says what the two mean.
+20. **`Sketch.copy(entities, Matrix3D)` takes the matrix in sketch
+    coordinates** (verified on a sketch on the XY plane, where sketch and
+    model space coincide; a sketch on a face is still to be checked) and
+    **`SketchCircle.radius` is settable on the copies** (they carry no
+    constraints).
+21. Driving Fusion for these tests: single-click a text field, `ctrl+a`,
+    type, then click another field to commit; `Tab` and triple-clicks sent
+    keystrokes to the viewport, where single letters are command
+    shortcuts (an *Align* dialog opened and terminated the command). The
+    command search palette and the moment a dialog closes register as a
+    "Chrome" window to the computer-use gate; the toolbar button works.
 
 **Diagnostics log.** `command.py` appends what the edit path does to
 `~/.fusion_formula_pattern.log` (emptied when the add-in starts): the

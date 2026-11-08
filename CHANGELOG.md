@@ -1,5 +1,33 @@
 # Changelog
 
+## 1.2.0 — 2026-11-08
+
+* *Path* pattern type: two formulas give every copy's offset in a plane,
+  as X / Y or radius / angle, between two directions (or the sketch axes).
+  Presets: Archimedean spiral, Logarithmic spiral, Sunflower (phyllotaxis),
+  Sine wave, Ellipse, Grid.
+* *Vary each copy* group: a **Rotation** formula (degrees about an axis,
+  applied before the copy moves), a **Size** formula (scale factor about a
+  point, or the diameter of sketch circles) and, for the new *Profiles*
+  object type, a **Depth** formula that extrudes the profile per copy with
+  *New body*, *Join* or *Cut* into a target body.
+* These are built from native Copy, Scale, Move, Extrude and Combine
+  features (one occurrence per copy for components; transformed copies for
+  sketch curves) in the usual timeline group, listed and editable through
+  *Saved pattern* like every other pattern. Linear and circular patterns
+  without variation are built exactly as before.
+* The preview lists path points and every copy's turn, size and depth.
+* With *Cut* a positive depth goes into the target body and with *Join*
+  away from it, whichever way the sketch faces; *New body* follows the
+  sketch normal.
+* Editing finds a pattern's features again by id right before replacing
+  them, so a pattern whose feature handles went stale while the dialog was
+  open is still replaced in place.
+
+Tested in Fusion: a sunflower path of 40 bodies, louvres with a rotation
+formula (converted in place from a 1.1 linear pattern), QRD wells cut by a
+Profiles pattern, and sketch circles with growing diameters.
+
 ## 1.1.0 — 2026-11-06
 
 * Edit a saved pattern: the *Saved pattern* list at the top of the dialog

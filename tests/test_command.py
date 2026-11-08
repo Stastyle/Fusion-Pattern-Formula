@@ -1240,7 +1240,8 @@ class EditingSavedPattern(FusionHarness):
     def test_the_copies_input_accepts_features_and_sketch_curves_without_limit(self):
         cmd, dialog = self.open_dialog()
         existing = cmd.commandInputs.itemById(C.ID_EXISTING)
-        self.assertEqual(existing.selectionFilters, ['Features', 'SketchCurves', 'SketchPoints'])
+        # 1.2 added bodies and occurrences (copies made by the transform engine) to the filters.
+        self.assertEqual(existing.selectionFilters, ['Features', 'SketchCurves', 'SketchPoints', 'Bodies', 'Occurrences'])
         self.assertEqual(existing.getSelectionLimits()[1:], (0, 0))
         self.assertEqual(existing.selectionCount, 0)
 

@@ -44,13 +44,15 @@ Manual install: copy the `FormulaPattern` folder to
 
 ## Using it
 
-1. **Pattern type**: Linear (copies along a direction) or Circular (copies around an axis).
-2. **Object type** and **Objects**: Bodies, Features, Faces, Components or
-   Sketch curves, then click what to pattern. Changing the type clears the
-   selection and switches what can be clicked.
+1. **Pattern type**: Linear (copies along a direction), Circular (copies
+   around an axis) or Path (two formulas give every copy's X / Y or
+   radius / angle offset in a plane: spirals, waves, grids).
+2. **Object type** and **Objects**: Bodies, Features, Faces, Components,
+   Sketch curves or Profiles, then click what to pattern. Changing the type
+   clears the selection and switches what can be clicked.
 3. **Direction** (a linear edge, sketch line or construction axis) or **Axis**
-   (also circular edges and cylindrical faces). **Flip direction** sends the
-   copies the other way.
+   (also circular edges and cylindrical faces); a Path takes two directions.
+   **Flip direction** sends the copies the other way.
 4. **Copies**: how many new copies. The original stays and is copy 0; the
    formula runs for `i = 1 … Copies`.
 5. **Formula**: pick a **Preset** or write your own. **Formula gives** chooses
@@ -62,9 +64,16 @@ Manual install: copy the `FormulaPattern` folder to
 6. **a, b, c** are values you can use inside the formula. `a` carries units
    (a length for linear, an angle for circular), so `25.5 in` works; `b` and
    `c` are plain numbers.
-7. The **Preview** box lists every copy's position (and gap) as you type;
-   the model updates too while *Show in model* is on. Errors say which copy
-   failed and why, and OK stays disabled until the formula is good.
+7. **Vary each copy** (collapsed): more formulas, one per copy. **Rotation**
+   turns every copy by its own angle about an axis; **Size** scales it, or
+   sets a sketch circle's diameter; **Depth** (with *Object type: Profiles*)
+   extrudes the profile by its own depth per copy and can join or cut the
+   result into a target body. These work with bodies, components, sketch
+   curves and profiles.
+8. The **Preview** box lists every copy's position (and gap, turn, size and
+   depth) as you type; the model updates too while *Show in model* is on.
+   Errors say which copy failed and why, and OK stays disabled until the
+   formula is good.
 
 Example, fret slots for a 25.5" scale: model the slot as a cut at the nut,
 choose *Object type: Features*, click the slot cut, click an edge running
@@ -102,6 +111,9 @@ line down the neck, and pattern the slot along it.
 | Fibonacci gaps | gap | `a * fib(i)` | a = first gap |
 | Golden angle (circular only) | angle step | `a` | a = 137.508° |
 
+Path presets (two formulas): Archimedean spiral, Logarithmic spiral,
+Sunflower (phyllotaxis), Sine wave, Ellipse, Grid (b per row).
+
 Editing the formula or the mode turns the preset into *Custom*; the values
 you typed are kept.
 
@@ -134,6 +146,12 @@ is a normal Fusion pattern with quantity 2 and the computed extent, so you
 can edit, suppress or delete individual copies afterwards. The settings used
 are stored as attributes on the features (`FormulaPattern/settings`).
 
+Path patterns, patterns with Rotation or Size, and Profiles patterns are
+built from native Copy, Scale, Move, Extrude and Combine features instead
+(one new occurrence per copy for components), in the same kind of group.
+
+![Sunflower path, twisting louvres, QRD wells and growing circles](docs/images/1.2-overview.jpg)
+
 The last-used values (not selections) are remembered in
 `~/.fusion_formula_pattern.json`.
 
@@ -153,7 +171,10 @@ in the list makes a new one from the loaded values instead.
   (the numeric preview stays live); the result is built when you press OK.
 * Replacing a pattern breaks later features that referenced faces of the
   old copies, as deleting the group would; re-select them afterwards.
-* Only one direction per pattern. For a grid, run the command twice.
+* Linear and circular patterns have one direction; for a grid use a Path
+  pattern with the *Grid* preset.
+* Rotation and Size need bodies, components, sketch curves or profiles;
+  faces and features keep to plain positions.
 * Construction geometry cannot be patterned, same as the native command.
   Sketch curves use *Object type: Sketch curves* (see above).
 * Patterning features across components follows the native rules: the

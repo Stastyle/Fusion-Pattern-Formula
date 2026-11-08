@@ -5,10 +5,12 @@ Rectangular / Circular Pattern, except that **a formula decides where every
 copy goes**. Guitar fret slots, louvres that get denser toward one end, holes
 whose spacing grows geometrically, rings whose angular step eases in and out:
 pick a preset or write the rule yourself, watch the numbers and the model
-update live, press OK.
+update live, press OK. Since 1.2 a *Path* pattern takes two formulas for
+a layout in a plane (spirals, waves, grids), and more formulas can turn,
+scale or extrude every copy by its own amount.
 
-It works on bodies, faces, features (cuts included) and components, and on
-sketch curves while you edit a sketch.
+It works on bodies, faces, features (cuts included), components and sketch
+profiles, and on sketch curves while you edit a sketch.
 
 Contents
 
@@ -68,18 +70,25 @@ Stop, so no Fusion restart is needed.
 
 | Field | What it does |
 |---|---|
-| **Pattern type** | *Linear*: copies along a direction. *Circular*: copies around an axis. |
-| **Object type** | Bodies, Features, Faces, Components or Sketch curves. All selected objects must be of this kind. Changing it clears the selection and switches what can be clicked. |
+| **Pattern type** | *Linear*: copies along a direction. *Circular*: copies around an axis. *Path*: two formulas give every copy's offset in a plane, as X / Y or as radius / angle (spirals, waves, sunflower layouts, grids). |
+| **Object type** | Bodies, Features, Faces, Components, Sketch curves or Profiles. All selected objects must be of this kind. Changing it clears the selection and switches what can be clicked. *Profiles* are sketch profiles: every copy is the profile extruded by its own **Depth** (see *Vary each copy*). |
 | **Objects** | Click what to pattern. |
 | **Direction** (linear) | A linear edge, sketch line or construction axis. In a sketch: a sketch line, or leave it empty to pattern along the sketch's X axis. |
+| **Direction**, **Direction 2 (Y)** (path) | The two directions that span the plane of the path: *Direction* is X, *Direction 2* is Y and is made perpendicular to it. In a sketch the path uses the sketch's X and Y axes, or the chosen line and its in-plane perpendicular, so only *Direction* is offered. |
 | **Axis** (circular) | A linear edge, construction axis, sketch line, circular edge, sketch circle, or a cylindrical / conical / toroidal face. In a sketch: a sketch point, or a circle to use its centre. |
 | **Flip direction** | Mirrors the pattern to the other side of the original (negative distances / angles). |
 | **Copies** | How many *new* copies, 1 … 1000. The original stays where it is and is copy 0; the formula runs for `i = 1 … Copies`. |
 | **Preset** | Ready-made formulas (see [Presets](#4-presets)). Picking one fills in the formula, the mode and `a b c`. Editing any of them switches the preset to *Custom* without losing your values. |
 | **Formula gives** | *Distance from original* (or *Angle from original*): the formula is where copy `i` sits, measured from the original. *Gap to previous* (or *Angle step from previous*): the formula is the step from copy `i-1` to copy `i`; the positions add up. |
 | **Formula** | The rule. See [Writing a formula](#5-writing-a-formula). |
-| **a** | A value for the formula with units: a length for linear patterns, an angle for circular ones. Expressions and units work, e.g. `25.5 in` or `scale / 2`. |
+| **Coordinates** (path) | *X / Y*: the two formulas are offsets along Direction and Direction 2. *Radius / Angle*: the first formula is the distance from the original, the second the angle in degrees, measured from Direction. |
+| **Formula**, **Second formula** (path) | The two rules: X and Y, or radius and angle; the note under them says which. Both see the same `i n t a b c`. |
+| **a** | A value for the formula with units: a length for linear and path patterns, an angle for circular ones. Expressions and units work, e.g. `25.5 in` or `scale / 2`. |
 | **b, c** | Plain numbers for the formula. |
+| **Vary each copy** (collapsed group) | Formulas that change every copy on top of its position. An empty field means "no change". These need bodies, components, sketch curves or profiles; faces and features cannot be rotated or scaled one by one. |
+| **Rotation**, **Rotation axis** | Degrees to turn copy `i` about the axis (a linear edge, construction axis or sketch line) before it moves into place, so copies spin about the *original's* axis. In a sketch the field takes a sketch point to turn about; left empty, the copies turn about the centre of the selected curves. Example `b * i`. |
+| **Size**, **Size gives**, **Scale about** | *Scale factor*: copy `i` is scaled by the formula (1 = unchanged) about the chosen point (a vertex, sketch point or construction point). *Diameter (circles)*: for sketch circles, the formula is the copy's diameter in document units. Not available for components. |
+| **Depth**, **Operation**, **Target body** (profiles) | Each copy is the profile extruded by the formula's depth in document units. With *Cut* a positive depth goes into the target body, with *Join* away from it, with *New body* along the sketch's normal; a negative depth goes the other way. *New body* keeps the copies as separate bodies; *Join* / *Cut* merge them into, or cut them out of, the target body with one Combine feature. |
 | **Preview** | Every copy's position (and gap), the farthest copy, and any warnings or errors. Updates as you type. Closed by default; opens by itself when there is an error to show. |
 | **Show in model** | Builds the copies while the dialog is open. Switches itself off above 100 copies; the result is still built when you press OK. |
 | **Saved pattern** (in *Edit a saved pattern*, at the top) | A list of every pattern made by Formula Pattern in this design. Pick one to load it and highlight its copies; OK then replaces that pattern. *New pattern* makes a new one. See [Editing a saved pattern](#editing-a-saved-pattern). |
@@ -150,6 +159,63 @@ Lengths arrive in the document's units, angles in degrees, unitless
 parameters as plain numbers. The pattern does not update automatically when
 the parameter changes; run the command again.
 
+### 3.6 A sunflower of pegs (path pattern)
+
+1. Model one peg (a small cylinder) where the centre of the layout should
+   be. **SOLID → CREATE → Formula Pattern**, *Pattern type* **Path**,
+   *Object type* **Bodies**, click the peg.
+2. **Direction** and **Direction 2 (Y)**: two edges of the base plate,
+   or the X and Y axes under *Origin* in the browser.
+3. *Copies* `60`, preset **Sunflower (phyllotaxis)**: radius `a * sqrt(i)`,
+   angle `i * 137.508`. `a` sets how far apart the pegs end up.
+4. The preview lists every copy as `(x, y)`; the model shows the spiral.
+   **OK**.
+
+Each copy is a native *Copy* and *Move* feature in one timeline group.
+Swap the preset for **Sine wave**, **Ellipse** or **Grid (b per row)**, or
+write two formulas of your own.
+
+![40 pegs in a sunflower layout](images/1.2-sunflower-pegs.jpg)
+
+### 3.7 Test holes that grow (diameter)
+
+In a sketch, draw one circle. **Formula Pattern**: *Object type* **Sketch
+curves**, click the circle, *Copies* `10`, formula `a * i` with `a = 8 mm`.
+Open **Vary each copy**, type `a + 0.1 * i` into **Size** and choose
+**Diameter (circles)**. Every copy is a circle 0.1 mm wider than the one
+before, in a row 8 mm apart: extrude them all as a cut for a tolerance
+test, or as pins. **Scale factor** does the same for any sketch curves,
+with a factor instead of a diameter.
+
+### 3.8 Louvres that twist (rotation)
+
+Model one louvre standing on the origin. *Pattern type* **Linear**,
+**Bodies**, click the louvre, *Direction*: the X axis, *Copies* `12`,
+formula `a * i`. Under **Vary each copy** set **Rotation** to `b * i` and
+**Rotation axis** to the Z axis (which runs through the louvre). With
+`b = 7.5` each copy is turned 7.5° more than the last. The rotation is
+about the original's axis, before the copy moves into place, so every
+louvre turns about its own centre.
+
+![Louvres twisting along a row](images/1.2-twisting-louvres.jpg)
+
+### 3.9 A QRD diffuser (profiles and depth)
+
+1. Sketch one well (a rectangle) on the top face of a block.
+2. **Formula Pattern**, *Object type* **Profiles**, click the rectangle's
+   profile, *Direction*: an edge of the block, *Copies* `6`, formula
+   `a * i` with `a` = the well pitch.
+3. **Vary each copy**: **Depth** `a * ((i * i) % 7) / 7` (the quadratic
+   residue sequence for N = 7; the original is well 0), **Operation**
+   **Cut**, **Target body**: the block. **OK**.
+
+Each copy is an extrude of the profile by its own depth, moved into place,
+and one Combine cuts them all out of the block; with *Cut* a positive depth
+always goes into the target. Choose **New body** to keep them as separate
+bodies instead, or **Join** to add them.
+
+![QRD wells cut into a block, with the dialog](images/1.2-qrd-wells-dialog.jpg)
+
 ---
 
 ## 4. Presets
@@ -165,6 +231,17 @@ the parameter changes; run the command again.
 | Ease in (power) | distance | `a * t^b` | a = total extent, b = curve (1 = even, 2 = quadratic) |
 | Fibonacci gaps | gap | `a * fib(i)` | a = first gap |
 | Golden angle (phyllotaxis) · circular only | angle step | `a` | a = 137.508° |
+
+Path presets give two formulas:
+
+| Preset | Coordinates | First formula | Second formula | Tunables |
+|---|---|---|---|---|
+| Archimedean spiral | radius / angle | `a * t` | `b * i` | a = radius of the last copy, b = degrees per copy |
+| Logarithmic spiral | radius / angle | `a * b^i` | `c * i` | a = first radius, b = growth per copy, c = degrees per copy |
+| Sunflower (phyllotaxis) | radius / angle | `a * sqrt(i)` | `i * 137.508` | a = spacing |
+| Sine wave | X / Y | `a * i` | `b * sin(2 * pi * t * c)` | a = step, b = amplitude, c = waves |
+| Ellipse | X / Y | `a * cos(2 * pi * t)` | `b * sin(2 * pi * t)` | a, b = the two radii (the original sits at the centre) |
+| Grid (b per row) | X / Y | `a * (i % b)` | `a * floor(i / b)` | a = pitch, b = copies per row (the original is the first cell) |
 
 The notes under the tunables explain what `a`, `b` and `c` mean for the
 chosen preset.
@@ -254,6 +331,29 @@ original curves when you edit them, and each copy's distance is a dimension
 you can change. Sketch patterns are not timeline items, so there is no
 group.
 
+### Path patterns and varied copies
+
+A Path pattern, anything with a Rotation or Size formula, and every
+Profiles pattern is built by placing each copy with an explicit transform
+instead of a native pattern feature:
+
+* **Bodies**: a *Copy* feature (the native copy/paste body), then a *Scale*
+  feature when Size is set, then a *Move* feature that rotates and moves
+  the copy into place.
+* **Components**: one new occurrence of the component per copy, placed by
+  its transform.
+* **Profiles**: an *Extrude* of the profile by the copy's depth, then
+  Scale / Move as for bodies, and for *Join* / *Cut* one *Combine* feature
+  at the end.
+* **Sketch curves**: copies of the curves (rotated and moved), scaled or
+  given their diameter; not constrained to the original.
+
+The features go into the same timeline group as a linear pattern would
+and carry the same attributes, so the pattern can be edited later from
+*Saved pattern*. The bodies and sketch copies made this way carry a
+`member` attribute that points back to their pattern, so clicking one of
+them into *Copies* picks the pattern.
+
 ### Editing a saved pattern
 
 To change the formula, the count, the values or the selections of a pattern
@@ -326,7 +426,14 @@ are resolved.
 | `Can't read the formula …` | Syntax error, unknown name or disallowed construct. | Check spelling and parentheses; see the Formula reference. |
 | `'b' is not a valid number: …` | The `a`, `b` or `c` field holds something Fusion cannot evaluate. | Type a number or expression; `a` accepts units. |
 | `Copy i = 7: …` | The formula failed for that copy (overflow, division by zero, complex result). | Change the formula or the tunables. |
-| `Copy 3 lands on the original` | The formula gave 0 (or a multiple of 360°) for that copy. | Use *Gap to previous*, add an offset, or change the formula. |
+| `Copy 3 lands on the original` | The formula gave 0 (or a multiple of 360°, or the point (0, 0) on a path) for that copy. | Use *Gap to previous*, add an offset, or change the formula. |
+| `Copy i = 3, Y formula: …` / `Rotation, copy i = 3: …` | The named formula failed for that copy. | Change that formula or the tunables. |
+| `Copy 3: size must be greater than 0` / `Copy 3 has depth 0` | The Size or Depth formula gave a value Fusion cannot build. | Change the formula; a depth may be negative but not zero. |
+| `Direction 2 must not be parallel to Direction 1` | The two path directions do not span a plane. | Pick another edge or axis for Direction 2. |
+| `Path, Rotation and Size need bodies, components, sketch curves or profiles` | Faces or features cannot be rotated or scaled one by one. | Pattern the body instead, or clear the Rotation / Size fields. |
+| `Size does not apply to components` | An occurrence cannot be scaled. | Clear Size, or pattern the bodies. |
+| `Diameter needs sketch circles` | *Diameter (circles)* was chosen with other curves selected. | Select circles only, or choose *Scale factor*. |
+| `Profiles need a Depth formula` | *Object type* is Profiles and Depth is empty. | Type a depth formula (a constant such as `a` is fine). |
 | `⚠ …` | A warning; the pattern is still built. | Duplicate positions, for example. |
 | `Select the objects …` / `Select the centre point …` | Something is not selected yet. | Select it. |
 | `All selected curves must be in the same sketch` | Sketch curves from two sketches were selected. | Select curves from one sketch; run the command once per sketch. |
@@ -356,7 +463,10 @@ Start-up problems show a message box:
 
 ## 9. Limits
 
-* One direction per pattern. For a grid, run the command twice.
+* Linear and circular patterns have one direction; a grid or any other
+  two-dimensional layout is a *Path* pattern (preset *Grid*).
+* Rotation and Size are not available for faces and features, and Size is
+  not available for components; the dialog says so.
 * Construction geometry (planes, axes, points) cannot be patterned.
 * The result is parametric per copy, but not linked to the formula: changing
   `a` or a user parameter later means loading the pattern through *Saved

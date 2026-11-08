@@ -620,8 +620,37 @@ class ObjectCollection(Base):
     def asArray(self):
         return list(self._items)
 
+    @staticmethod
+    def createWithArray(array):
+        c = ObjectCollection()
+        c._items = list(array)
+        return c
+
+    def removeByItem(self, item):
+        if item not in self._items:
+            return False
+        self._items.remove(item)
+        return True
+
+    def removeByIndex(self, index):
+        del self._items[index]
+        return True
+
+    def contains(self, item):
+        return item in self._items
+
+    def clear(self):
+        self._items = []
+        return True
+
     def __iter__(self):
         return iter(self._items)
+
+    def __len__(self):
+        return len(self._items)
+
+    def __getitem__(self, index):
+        return self._items[index]
 
 
 class Attribute(Base):
@@ -659,6 +688,9 @@ class Attributes(Base):
                 if a.groupName == groupName and a.name == name and not getattr(a.parent, '_deleted', False)]
 
 
+_reset_hooks = []   # callables run by Application.reset(); fusion.py adds its token registry
+
+
 class Application(Base):
     _instance = None
 
@@ -677,3 +709,368 @@ class Application(Base):
     def reset(cls):
         cls._instance = None
         Attributes._registry = []
+        for hook in _reset_hooks:
+            hook()
+
+
+# ---- geometry ----
+#
+# Real maths, so the add-in's placement helpers can be checked against them. A matrix is
+# 16 floats row-major, as Matrix3D.asArray() hands them out; the translation sits in the
+# last column (cells 3, 7, 11). The private helpers work on plain cell lists and are shared
+# with fusion.py.
+
+def _identity():
+    return [1.0, 0.0, 0.0, 0.0, 0.0, 1.0, 0.0, 0.0, 0.0, 0.0, 1.0, 0.0, 0.0, 0.0, 0.0, 1.0]
+
+
+def _multiply(a, b):
+    """a · b: apply b first, then a."""
+    return [sum(a[r * 4 + k] * b[k * 4 + c] for k in range(4)) for r in range(4) for c in range(4)]
+
+
+def _apply_point(cells, x, y, z):
+    return tuple(cells[r * 4] * x + cells[r * 4 + 1] * y + cells[r * 4 + 2] * z + cells[r * 4 + 3]
+                 for r in range(3))
+
+
+def _apply_vector(cells, x, y, z):
+    return tuple(cells[r * 4] * x + cells[r * 4 + 1] * y + cells[r * 4 + 2] * z for r in range(3))
+
+
+def _translation(dx, dy, dz):
+    m = _identity()
+    m[3], m[7], m[11] = float(dx), float(dy), float(dz)
+    return m
+
+
+def _rotation(angle, axis, origin):
+    """Rodrigues: rotation by ``angle`` radians about the unit ``axis`` through ``origin``."""
+    ux, uy, uz = axis
+    c, s = math.cos(angle), math.sin(angle)
+    t = 1.0 - c
+    r = [[c + ux * ux * t, ux * uy * t - uz * s, ux * uz * t + uy * s],
+         [uy * ux * t + uz * s, c + uy * uy * t, uy * uz * t - ux * s],
+         [uz * ux * t - uy * s, uz * uy * t + ux * s, c + uz * uz * t]]
+    ox, oy, oz = origin
+    moved = [r[i][0] * ox + r[i][1] * oy + r[i][2] * oz for i in range(3)]
+    cells = _identity()
+    for i in range(3):
+        cells[i * 4:i * 4 + 3] = r[i]
+        cells[i * 4 + 3] = origin[i] - moved[i]
+    return cells
+
+
+def _invert(cells):
+    """Gauss-Jordan inverse of a 4×4; None when singular."""
+    n = 4
+    a = [list(cells[r * 4:r * 4 + 4]) + [1.0 if r == c else 0.0 for c in range(n)] for r in range(n)]
+    for col in range(n):
+        pivot = max(range(col, n), key=lambda r: abs(a[r][col]))
+        if abs(a[pivot][col]) < 1e-12:
+            return None
+        a[col], a[pivot] = a[pivot], a[col]
+        p = a[col][col]
+        a[col] = [v / p for v in a[col]]
+        for r in range(n):
+            if r != col and a[r][col] != 0.0:
+                f = a[r][col]
+                a[r] = [rv - f * cv for rv, cv in zip(a[r], a[col])]
+    return [a[r][c] for r in range(n) for c in range(n, 2 * n)]
+
+
+def _det3(c):
+    return (c[0] * (c[5] * c[10] - c[6] * c[9])
+            - c[1] * (c[4] * c[10] - c[6] * c[8])
+            + c[2] * (c[4] * c[9] - c[5] * c[8]))
+
+
+class _XYZ(Base):
+    """Shared by Point3D and Vector3D: three coordinates with the usual accessors."""
+    _tolerance = 1e-9
+
+    def __init__(self, x=0.0, y=0.0, z=0.0):
+        self.x, self.y, self.z = float(x), float(y), float(z)
+
+    @classmethod
+    def create(cls, x=0.0, y=0.0, z=0.0):
+        return cls(x, y, z)
+
+    def asArray(self):
+        return [self.x, self.y, self.z]
+
+    def setWithArray(self, coordinates):
+        self.x, self.y, self.z = (float(v) for v in coordinates)
+        return True
+
+    def set(self, x, y, z):
+        self.x, self.y, self.z = float(x), float(y), float(z)
+        return True
+
+    def getData(self):
+        return True, self.x, self.y, self.z
+
+    def copy(self):
+        return type(self)(self.x, self.y, self.z)
+
+    def isEqualTo(self, other):
+        return self.isEqualToByTolerance(other, self._tolerance)
+
+    def isEqualToByTolerance(self, other, tolerance):
+        return (abs(self.x - other.x) <= tolerance and abs(self.y - other.y) <= tolerance
+                and abs(self.z - other.z) <= tolerance)
+
+    def __repr__(self):
+        return f'{type(self).__name__}({self.x:g}, {self.y:g}, {self.z:g})'
+
+
+class Point3D(_XYZ):
+    def transformBy(self, matrix):
+        self.x, self.y, self.z = _apply_point(matrix._cells, self.x, self.y, self.z)
+        return True
+
+    def distanceTo(self, point):
+        return math.sqrt((self.x - point.x) ** 2 + (self.y - point.y) ** 2 + (self.z - point.z) ** 2)
+
+    def vectorTo(self, point):
+        return Vector3D(point.x - self.x, point.y - self.y, point.z - self.z)
+
+    def translateBy(self, vector):
+        self.x, self.y, self.z = self.x + vector.x, self.y + vector.y, self.z + vector.z
+        return True
+
+    def asVector(self):
+        return Vector3D(self.x, self.y, self.z)
+
+
+class Vector3D(_XYZ):
+    def transformBy(self, matrix):
+        # A vector is a direction: the translation column does not apply.
+        self.x, self.y, self.z = _apply_vector(matrix._cells, self.x, self.y, self.z)
+        return True
+
+    @property
+    def length(self):
+        return math.sqrt(self.x ** 2 + self.y ** 2 + self.z ** 2)
+
+    def normalize(self):
+        n = self.length
+        if n == 0.0:
+            return False
+        self.x, self.y, self.z = self.x / n, self.y / n, self.z / n
+        return True
+
+    def add(self, vector):
+        self.x, self.y, self.z = self.x + vector.x, self.y + vector.y, self.z + vector.z
+        return True
+
+    def subtract(self, vector):
+        self.x, self.y, self.z = self.x - vector.x, self.y - vector.y, self.z - vector.z
+        return True
+
+    def scaleBy(self, scale):
+        self.x, self.y, self.z = self.x * scale, self.y * scale, self.z * scale
+        return True
+
+    def dotProduct(self, vector):
+        return self.x * vector.x + self.y * vector.y + self.z * vector.z
+
+    def crossProduct(self, vector):
+        return Vector3D(self.y * vector.z - self.z * vector.y,
+                        self.z * vector.x - self.x * vector.z,
+                        self.x * vector.y - self.y * vector.x)
+
+    def angleTo(self, vector):
+        denominator = self.length * vector.length
+        if denominator == 0.0:
+            return 0.0
+        return math.acos(max(-1.0, min(1.0, self.dotProduct(vector) / denominator)))
+
+    def isParallelTo(self, vector):
+        return self.crossProduct(vector).length <= self._tolerance * max(1.0, self.length * vector.length)
+
+    def isPerpendicularTo(self, vector):
+        return abs(self.dotProduct(vector)) <= self._tolerance * max(1.0, self.length * vector.length)
+
+    def asPoint(self):
+        return Point3D(self.x, self.y, self.z)
+
+
+class Matrix3D(Base):
+    def __init__(self):
+        self._cells = _identity()
+
+    @staticmethod
+    def create():
+        return Matrix3D()
+
+    def setToIdentity(self):
+        self._cells = _identity()
+        return True
+
+    def asArray(self):
+        return list(self._cells)
+
+    def setWithArray(self, cells):
+        cells = [float(v) for v in cells]
+        if len(cells) != 16:
+            raise ValueError('Matrix3D.setWithArray wants 16 cells')
+        self._cells = cells
+        return True
+
+    def getCell(self, row, column):
+        return self._cells[row * 4 + column]
+
+    def setCell(self, row, column, value):
+        self._cells[row * 4 + column] = float(value)
+        return True
+
+    def copy(self):
+        m = Matrix3D()
+        m._cells = list(self._cells)
+        return m
+
+    def transformBy(self, matrix):
+        """self = matrix · self: ``matrix`` is applied after what self already does."""
+        self._cells = _multiply(matrix._cells, self._cells)
+        return True
+
+    def invert(self):
+        inverse = _invert(self._cells)
+        if inverse is None:
+            return False
+        self._cells = inverse
+        return True
+
+    @property
+    def determinant(self):
+        return _det3(self._cells)
+
+    @property
+    def translation(self):
+        return Vector3D(self._cells[3], self._cells[7], self._cells[11])
+
+    @translation.setter
+    def translation(self, value):
+        self._cells[3], self._cells[7], self._cells[11] = float(value.x), float(value.y), float(value.z)
+
+    def isEqualTo(self, matrix):
+        return all(abs(a - b) <= 1e-9 for a, b in zip(self._cells, matrix._cells))
+
+    def setToRotation(self, angle, axis, origin):
+        """Rotation by ``angle`` radians about ``axis`` through ``origin``."""
+        unit = axis.copy()
+        if not unit.normalize():
+            raise RuntimeError('3 : invalid argument axis')
+        self._cells = _rotation(float(angle), (unit.x, unit.y, unit.z), (origin.x, origin.y, origin.z))
+        return True
+
+    def setWithCoordinateSystem(self, origin, xAxis, yAxis, zAxis):
+        self._cells = [xAxis.x, yAxis.x, zAxis.x, origin.x,
+                       xAxis.y, yAxis.y, zAxis.y, origin.y,
+                       xAxis.z, yAxis.z, zAxis.z, origin.z,
+                       0.0, 0.0, 0.0, 1.0]
+        return True
+
+    def getAsCoordinateSystem(self):
+        c = self._cells
+        return (Point3D(c[3], c[7], c[11]), Vector3D(c[0], c[4], c[8]),
+                Vector3D(c[1], c[5], c[9]), Vector3D(c[2], c[6], c[10]))
+
+    def __repr__(self):
+        rows = [' '.join(f'{v:g}' for v in self._cells[r * 4:r * 4 + 4]) for r in range(4)]
+        return 'Matrix3D[' + '; '.join(rows) + ']'
+
+
+class BoundingBox3D(Base):
+    def __init__(self, minPoint, maxPoint):
+        self.minPoint, self.maxPoint = minPoint.copy(), maxPoint.copy()
+
+    @staticmethod
+    def create(minPoint, maxPoint):
+        return BoundingBox3D(minPoint, maxPoint)
+
+    def copy(self):
+        return BoundingBox3D(self.minPoint, self.maxPoint)
+
+    def contains(self, point):
+        return (self.minPoint.x <= point.x <= self.maxPoint.x and self.minPoint.y <= point.y <= self.maxPoint.y
+                and self.minPoint.z <= point.z <= self.maxPoint.z)
+
+    def expand(self, point):
+        self.minPoint = Point3D(min(self.minPoint.x, point.x), min(self.minPoint.y, point.y),
+                                min(self.minPoint.z, point.z))
+        self.maxPoint = Point3D(max(self.maxPoint.x, point.x), max(self.maxPoint.y, point.y),
+                                max(self.maxPoint.z, point.z))
+        return True
+
+    def combine(self, boundingBox):
+        self.expand(boundingBox.minPoint)
+        self.expand(boundingBox.maxPoint)
+        return True
+
+    def intersects(self, boundingBox):
+        return all(getattr(self.minPoint, a) <= getattr(boundingBox.maxPoint, a)
+                   and getattr(boundingBox.minPoint, a) <= getattr(self.maxPoint, a) for a in 'xyz')
+
+
+class Line3D(Base):
+    def __init__(self, startPoint, endPoint):
+        self.startPoint, self.endPoint = startPoint.copy(), endPoint.copy()
+
+    @staticmethod
+    def create(startPoint, endPoint):
+        return Line3D(startPoint, endPoint)
+
+    def copy(self):
+        return Line3D(self.startPoint, self.endPoint)
+
+    def getData(self):
+        return True, self.startPoint.copy(), self.endPoint.copy()
+
+    def set(self, startPoint, endPoint):
+        self.startPoint, self.endPoint = startPoint.copy(), endPoint.copy()
+        return True
+
+    def asInfiniteLine(self):
+        direction = self.startPoint.vectorTo(self.endPoint)
+        direction.normalize()
+        return InfiniteLine3D(self.startPoint, direction)
+
+
+class InfiniteLine3D(Base):
+    def __init__(self, origin, direction):
+        self.origin, self.direction = origin.copy(), direction.copy()
+
+    @staticmethod
+    def create(origin, direction):
+        return InfiniteLine3D(origin, direction)
+
+    def copy(self):
+        return InfiniteLine3D(self.origin, self.direction)
+
+    def getData(self):
+        return True, self.origin.copy(), self.direction.copy()
+
+    def set(self, origin, direction):
+        self.origin, self.direction = origin.copy(), direction.copy()
+        return True
+
+
+class Circle3D(Base):
+    def __init__(self, center, normal, radius):
+        self.center, self.normal, self.radius = center.copy(), normal.copy(), float(radius)
+
+    @staticmethod
+    def createByCenter(center, normal, radius):
+        return Circle3D(center, normal, radius)
+
+    def copy(self):
+        return Circle3D(self.center, self.normal, self.radius)
+
+    def getData(self):
+        return True, self.center.copy(), self.normal.copy(), self.radius
+
+    def set(self, center, normal, radius):
+        self.center, self.normal, self.radius = center.copy(), normal.copy(), float(radius)
+        return True

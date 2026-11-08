@@ -4,9 +4,9 @@
     "id": "65704ecf-6b9b-4a22-9eff-51bdbf9dc072",
     "author": "Stas Meirovich",
     "description": {
-        "": "Linear or circular pattern where a formula decides the distance or angle of every copy: guitar frets, growing gaps, easing curves, Fibonacci and your own formulas."
+        "": "Linear, circular or path pattern where formulas decide the position, rotation, size and depth of every copy: guitar frets, growing gaps, spirals, sunflower layouts, diffusers and your own formulas."
     },
-    "version": "1.1.0",
+    "version": "1.2.0",
     "runOnStartup": true,
     "supportedOS": "windows|mac",
     "editEnabled": true
