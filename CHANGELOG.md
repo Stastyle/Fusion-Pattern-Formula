@@ -1,5 +1,21 @@
 # Changelog
 
+## 1.3.0 — 2026-11-09
+
+* **`i` is now the item number: the original is 1 and the copies are
+  2 … Copies + 1** (before, the first copy was `i = 1`). Every formula,
+  Rotation, Size and Depth included, is evaluated for the copies with these
+  numbers, so a growth formula such as `i^1.4` or `a * i^1.2` already
+  changes the first copy instead of repeating the original. `t = (i - 1) / n`
+  is 0 at the original and 1 at the last copy; `n` is still the number of
+  copies. The preview rows, the error messages and the Formula reference
+  use the item numbers. The presets were rewritten to keep their geometry
+  (frets: `a * (1 - 1 / 2^((i - 1) / 12))`, the nut being item 1 and item
+  `i` fret `i - 1`).
+* Patterns saved by earlier versions, and the remembered values, are
+  converted when they are loaded: every `i` in their formulas becomes
+  `(i - 1)`, so they rebuild exactly as before.
+
 ## 1.2.2 — 2026-11-08
 
 Found while checking every remaining mode combination in Fusion, with the

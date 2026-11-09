@@ -5,20 +5,27 @@ It knows how to:
 
 * parse and safely evaluate a user formula (``Formula``),
 * turn a formula into the offset of every copy (``compute_positions``),
+
+Numbering: ``i`` is the item number. The original is item 1 and is never changed; the
+copies are items 2 … n + 1, and every formula (position, gap, X / Y, radius / angle,
+rotation, size, depth) is evaluated for them literally. ``t = (i - 1) / n`` is 0 at the
+original and 1 at the last copy. (Up to 1.2.x the first copy was i = 1;
+``renumber_from_copies`` rewrites such formulas.)
 * describe the built-in presets (``PRESETS``),
 * render the numeric preview and the formula reference as simple HTML.
 """
 import ast
 import math
 import operator
+import re
 from dataclasses import dataclass, field
 from typing import Dict, List, Optional, Set, Tuple
 
-MODE_POSITION = 'position'   # formula = offset of copy i from the original
-MODE_SPACING = 'spacing'     # formula = gap between copy i-1 and copy i
+MODE_POSITION = 'position'   # formula = offset of item i from the original (item 1)
+MODE_SPACING = 'spacing'     # formula = gap between item i-1 and item i
 
-SIZE_SCALE = 'scale'         # size formula = scale factor of copy i
-SIZE_DIAMETER = 'diameter'   # size formula = diameter of copy i (sketch circles)
+SIZE_SCALE = 'scale'         # size formula = scale factor of item i
+SIZE_DIAMETER = 'diameter'   # size formula = diameter of item i (sketch circles)
 
 PHI = (1.0 + 5.0 ** 0.5) / 2.0
 
@@ -305,13 +312,26 @@ def compute_positions(spec: PatternSpec) -> PatternResult:
     result.rotations = _vary(spec.rotation, 'Rotation', n, env)
     result.sizes = _vary(spec.size, 'Size', n, env)
     result.depths = _vary(spec.depth, 'Depth', n, env)
-    for i, s in enumerate(result.sizes, 1):
+    for k, s in enumerate(result.sizes, 1):
         if s <= 0:
-            raise FormulaError(f'Copy {i}: size must be greater than 0')
-    for i, d in enumerate(result.depths, 1):
+            raise FormulaError(f'Size at i = {k + 1} must be greater than 0')
+    for k, d in enumerate(result.depths, 1):
         if abs(d) < ZERO_TOLERANCE:
-            raise FormulaError(f'Copy {i} has depth 0')
+            raise FormulaError(f'Depth is 0 at i = {k + 1}')
     return result
+
+
+_BARE_I = re.compile(r'\bi\b')
+
+
+def renumber_from_copies(text: str) -> str:
+    """Rewrite a formula written for 1.2.x, where ``i`` was the copy number (first copy 1),
+    for the numbering used since 1.3, where the original is item 1 and the first copy
+    item 2: every bare ``i`` becomes ``(i - 1)``, so the pattern it describes is unchanged.
+    ``t`` and ``n`` mean the same as before."""
+    if not text:
+        return text
+    return _BARE_I.sub('(i - 1)', text)
 
 
 def _parse(text: str, label: Optional[str] = None) -> Formula:
@@ -327,11 +347,13 @@ def _parse(text: str, label: Optional[str] = None) -> Formula:
 
 
 def _evaluate_copies(formula: Formula, n: int, env: Dict[str, float], describe) -> List[float]:
-    """Evaluate ``formula`` for i = 1..n; ``describe(i)`` prefixes the error for copy i."""
+    """Evaluate ``formula`` for the copies, items i = 2 … n + 1 (the original is item 1);
+    t = (i - 1) / n. ``describe(i)`` prefixes the error for item i."""
     values: List[float] = []
-    for i in range(1, n + 1):
+    for k in range(1, n + 1):
+        i = k + 1
         env['i'] = float(i)
-        env['t'] = i / n
+        env['t'] = k / n
         try:
             values.append(formula.evaluate(env))
         except FormulaError as e:
@@ -341,7 +363,7 @@ def _evaluate_copies(formula: Formula, n: int, env: Dict[str, float], describe) 
 
 def _line_positions(spec: PatternSpec, n: int, env: Dict[str, float]) -> PatternResult:
     formula = _parse(spec.formula)
-    values = _evaluate_copies(formula, n, env, lambda i: f'Copy i = {i}')
+    values = _evaluate_copies(formula, n, env, lambda i: f'i = {i}')
 
     positions: List[float] = []
     running = 0.0
@@ -357,10 +379,10 @@ def _line_positions(spec: PatternSpec, n: int, env: Dict[str, float]) -> Pattern
     if spec.circular:
         positions = [math.fmod(p, 360.0) for p in positions]
 
-    for i, p in enumerate(positions, 1):
+    for k, p in enumerate(positions, 1):
         if abs(p) < ZERO_TOLERANCE:
             why = 'its angle is a multiple of 360°' if spec.circular else 'its distance is 0'
-            raise FormulaError(f'Copy {i} lands on the original ({why}). '
+            raise FormulaError(f'The copy at i = {k + 1} lands on the original ({why}). '
                                'Change the formula so every copy moves away from it')
 
     warnings = _duplicate_warnings(positions, spec.circular)
@@ -372,8 +394,8 @@ def _path_positions(spec: PatternSpec, n: int, env: Dict[str, float]) -> Pattern
     label1, label2 = ('radius formula', 'angle formula') if spec.polar else ('X formula', 'Y formula')
     formula1 = _parse(spec.formula, label1)
     formula2 = _parse(spec.formula2, label2)
-    values = _evaluate_copies(formula1, n, env, lambda i: f'Copy i = {i}, {label1}')
-    values2 = _evaluate_copies(formula2, n, env, lambda i: f'Copy i = {i}, {label2}')
+    values = _evaluate_copies(formula1, n, env, lambda i: f'i = {i}, {label1}')
+    values2 = _evaluate_copies(formula2, n, env, lambda i: f'i = {i}, {label2}')
 
     points: List[Tuple[float, float]] = []
     for v1, v2 in zip(values, values2):
@@ -381,9 +403,9 @@ def _path_positions(spec: PatternSpec, n: int, env: Dict[str, float]) -> Pattern
         points.append((x, -y if spec.flip else y))
 
     positions = [math.hypot(x, y) for x, y in points]
-    for i, p in enumerate(positions, 1):
+    for k, p in enumerate(positions, 1):
         if p < ZERO_TOLERANCE:
-            raise FormulaError(f'Copy {i} lands on the original (its offset is 0). '
+            raise FormulaError(f'The copy at i = {k + 1} lands on the original (its offset is 0). '
                                'Change the formula so every copy moves away from it')
 
     return PatternResult(values=values, positions=positions, extent=max(positions),
@@ -395,7 +417,7 @@ def _vary(text: str, label: str, n: int, env: Dict[str, float]) -> List[float]:
     if not (text or '').strip():
         return []
     formula = _parse(text, label)
-    return _evaluate_copies(formula, n, env, lambda i: f'{label}, copy i = {i}')
+    return _evaluate_copies(formula, n, env, lambda i: f'{label}, i = {i}')
 
 
 def _duplicate_warnings(positions: List[float], circular: bool) -> List[str]:
@@ -428,7 +450,8 @@ def _duplicate_point_warnings(points: List[Tuple[float, float]]) -> List[str]:
 
 
 def _overlap_warnings(pairs: List[Tuple[int, int]]) -> List[str]:
-    warnings = [f'Copies {a} and {b} land on the same spot' for a, b in pairs[:3]]
+    """``pairs`` hold copy numbers (first copy 1); the message names the items (i = 2 …)."""
+    warnings = [f'The copies at i = {a + 1} and i = {b + 1} land on the same spot' for a, b in pairs[:3]]
     if len(pairs) > 3:
         warnings.append(f'… and {len(pairs) - 3} more overlapping pairs')
     return warnings
@@ -458,18 +481,19 @@ BOTH = ('linear', 'circular')
 ALL_KINDS = ('linear', 'circular', 'path')
 
 PRESETS: List[Preset] = [
-    Preset('custom', 'Custom', ALL_KINDS, MODE_POSITION, 'a * i', 10.0, 15.0, 0.0, 0.0,
-           'Write any formula. i is the copy number (1 … n), t runs 0 → 1, and a, b, c are the values below.',
+    Preset('custom', 'Custom', ALL_KINDS, MODE_POSITION, 'a * (i - 1)', 10.0, 15.0, 0.0, 0.0,
+           'Write any formula. i is the item number: the original is 1, the copies are 2 … n + 1; '
+           't runs 0 → 1, and a, b, c are the values below.',
            formula2='0'),
     Preset('constant', 'Constant spacing', BOTH, MODE_SPACING, 'a', 10.0, 15.0, 0.0, 0.0,
            'a = gap between neighbours. The same as the native pattern; edit the formula from here.'),
-    Preset('frets', 'Guitar frets (12-TET)', ('linear',), MODE_POSITION, 'a * (1 - 1 / 2^(i / 12))',
+    Preset('frets', 'Guitar frets (12-TET)', ('linear',), MODE_POSITION, 'a * (1 - 1 / 2^((i - 1) / 12))',
            648.0, 0.0, 0.0, 0.0,
-           'a = scale length (648 mm ≈ 25.5 in). Put the original at the nut: copy i becomes fret i. '
+           'a = scale length (648 mm ≈ 25.5 in). Put the original at the nut (item 1): item i is fret i - 1. '
            'Change the 12 for other temperaments.'),
-    Preset('geometric', 'Growing gaps (geometric)', BOTH, MODE_SPACING, 'a * b^(i - 1)', 10.0, 10.0, 1.2, 0.0,
+    Preset('geometric', 'Growing gaps (geometric)', BOTH, MODE_SPACING, 'a * b^(i - 2)', 10.0, 10.0, 1.2, 0.0,
            'a = first gap, b = growth per step (1.2 = +20 % each time; use 0.8 to shrink).'),
-    Preset('arithmetic', 'Growing gaps (arithmetic)', BOTH, MODE_SPACING, 'a + b * (i - 1)', 10.0, 10.0, 2.0, 0.0,
+    Preset('arithmetic', 'Growing gaps (arithmetic)', BOTH, MODE_SPACING, 'a + b * (i - 2)', 10.0, 10.0, 2.0, 0.0,
            'a = first gap, b = how much each gap grows, in document units (or degrees).'),
     Preset('ease_sine', 'Ease in & out (sine)', BOTH, MODE_POSITION, 'a * (1 - cos(pi * t)) / 2',
            100.0, 180.0, 0.0, 0.0,
@@ -477,7 +501,7 @@ PRESETS: List[Preset] = [
     Preset('ease_power', 'Ease in (power)', BOTH, MODE_POSITION, 'a * t^b', 100.0, 180.0, 2.0, 0.0,
            'a = total length (or angle), b = curve: b > 1 bunches copies near the start, '
            'b < 1 near the end, 1 spaces them evenly.'),
-    Preset('fibonacci', 'Fibonacci gaps', BOTH, MODE_SPACING, 'a * fib(i)', 5.0, 5.0, 0.0, 0.0,
+    Preset('fibonacci', 'Fibonacci gaps', BOTH, MODE_SPACING, 'a * fib(i - 1)', 5.0, 5.0, 0.0, 0.0,
            'a = size of the first gap; the gaps follow 1, 1, 2, 3, 5, 8, 13 …'),
     Preset('golden_angle', 'Golden angle (phyllotaxis)', ('circular',), MODE_SPACING, 'a', 0.0, 137.508, 0.0, 0.0,
            'a = the golden angle, 137.508°. Each copy turns by it, so copies never line up (sunflower seeds).'),
@@ -485,26 +509,26 @@ PRESETS: List[Preset] = [
     Preset('spiral', 'Archimedean spiral', ('path',), MODE_POSITION, 'a * t', 100.0, 0.0, 30.0, 0.0,
            'a = radius of the last copy (the radius grows evenly to it), '
            'b = turn between copies in degrees (30 = 12 copies per revolution).',
-           formula2='b * i', polar=True),
-    Preset('log_spiral', 'Logarithmic spiral', ('path',), MODE_POSITION, 'a * b^i', 5.0, 0.0, 1.15, 25.0,
+           formula2='b * (i - 1)', polar=True),
+    Preset('log_spiral', 'Logarithmic spiral', ('path',), MODE_POSITION, 'a * b^(i - 1)', 5.0, 0.0, 1.15, 25.0,
            'a = starting radius, b = growth per copy (1.15 = +15 % each time), '
            'c = turn between copies in degrees.',
-           formula2='c * i', polar=True),
-    Preset('phyllotaxis', 'Sunflower (phyllotaxis)', ('path',), MODE_POSITION, 'a * sqrt(i)', 5.0, 0.0, 0.0, 0.0,
-           'a = spacing: copy i sits at radius a·√i, turned by the golden angle 137.508° each time, '
-           'so copies never line up (sunflower seeds).',
-           formula2='i * 137.508', polar=True),
-    Preset('sine', 'Sine wave', ('path',), MODE_POSITION, 'a * i', 10.0, 0.0, 20.0, 1.0,
+           formula2='c * (i - 1)', polar=True),
+    Preset('phyllotaxis', 'Sunflower (phyllotaxis)', ('path',), MODE_POSITION, 'a * sqrt(i - 1)', 5.0, 0.0, 0.0, 0.0,
+           'a = spacing: the copy at item i sits at radius a·√(i - 1), turned by the golden angle '
+           '137.508° each time, so copies never line up (sunflower seeds).',
+           formula2='(i - 1) * 137.508', polar=True),
+    Preset('sine', 'Sine wave', ('path',), MODE_POSITION, 'a * (i - 1)', 10.0, 0.0, 20.0, 1.0,
            'a = step along X, b = wave height, c = number of full waves over all the copies.',
            formula2='b * sin(2 * pi * t * c)'),
     Preset('ellipse', 'Ellipse', ('path',), MODE_POSITION, 'a * cos(2 * pi * t)', 50.0, 0.0, 30.0, 0.0,
            'a = half width (along X), b = half height (along Y). The copies go once around; '
            'the original sits at the centre.',
            formula2='b * sin(2 * pi * t)'),
-    Preset('grid', 'Grid (b per row)', ('path',), MODE_POSITION, 'a * (i % b)', 10.0, 0.0, 5.0, 0.0,
+    Preset('grid', 'Grid (b per row)', ('path',), MODE_POSITION, 'a * ((i - 1) % b)', 10.0, 0.0, 5.0, 0.0,
            'a = spacing between neighbours, b = copies per row. The original is the first cell; '
            'the copies fill the rest of its row, then the rows above.',
-           formula2='a * floor(i / b)'),
+           formula2='a * floor((i - 1) / b)'),
 ]
 
 
@@ -541,7 +565,8 @@ def preview_html(result: PatternResult, unit: str, circular: bool, mode: str,
                  path: bool = False, size_kind: str = SIZE_SCALE) -> str:
     """Numeric preview of the copies, as simple HTML for a read-only text box.
 
-    Path lines read ``i = 3: (12.5, 4.1) mm``; ``circular`` and ``mode`` are then ignored.
+    Path lines read ``i = 3: (12.5, 4.1) mm`` (item numbers: the first copy is i = 2);
+    ``circular`` and ``mode`` are then ignored.
     Whatever varies is appended to every line: ``· turn 30°``, ``· ×1.2`` (or ``· ⌀8 mm``
     for ``size_kind == SIZE_DIAMETER``), ``· depth 8 mm``.
     """
@@ -567,8 +592,8 @@ def preview_html(result: PatternResult, unit: str, circular: bool, mode: str,
     def line(k):
         if path:
             x, y = result.points[k]
-            return f'i = {k + 1}: ({format_number(x)}, {format_number(y)}){u}' + vary(k)
-        text = f'i = {k + 1}: {format_number(result.positions[k])}{u}'
+            return f'i = {k + 2}: ({format_number(x)}, {format_number(y)}){u}' + vary(k)
+        text = f'i = {k + 2}: {format_number(result.positions[k])}{u}'
         if mode == MODE_SPACING:
             gap = -result.values[k] if flip else result.values[k]
             text += f' ({"+" if gap >= 0 else ""}{format_number(gap)})'
@@ -591,20 +616,20 @@ def error_html(message: str) -> str:
 
 REFERENCE_HTML = (
     '<b>Variables</b><br>'
-    '<b>i</b> copy number 1 … n (the original is 0) · <b>n</b> number of copies · '
-    '<b>t</b> = i / n, runs 0 → 1<br>'
+    '<b>i</b> item number: the original is 1, the copies are 2 … n + 1 · <b>n</b> number of copies · '
+    '<b>t</b> = (i − 1) / n, 0 at the original → 1 at the last copy<br>'
     '<b>a</b>, <b>b</b>, <b>c</b> the values above · any <b>user parameter</b> of the design by name<br>'
     '<b>Operators</b> + − * / ^ (power) % · comparisons and <i>x if cond else y</i><br>'
     '<b>Functions</b> sin cos tan asin acos atan atan2 (radians) · sind cosd tand (degrees) · '
     'rad deg · sqrt cbrt exp pow · ln log(x, base) log2 log10 · '
     'abs floor ceil round trunc · min max clamp(x, lo, hi) sign hypot · fib(i)<br>'
     '<b>Constants</b> pi e tau phi (golden ratio)<br>'
-    '<b>Examples</b> frets: <i>a * (1 - 1 / 2^(i/12))</i> · geometric gaps: <i>a * b^(i-1)</i> · '
-    'bunch at the end: <i>a * t^0.5</i><br>'
-    '<b>Path</b> two formulas give the X and Y offset of copy i (or its radius and angle in degrees); '
+    '<b>Examples</b> even gaps: <i>a * (i - 1)</i> · frets: <i>a * (1 - 1 / 2^((i-1)/12))</i> · '
+    'geometric gaps: <i>a * b^(i-2)</i> · growing steps: <i>a * i^1.2</i> · bunch at the end: <i>a * t^0.5</i><br>'
+    '<b>Path</b> two formulas give the X and Y offset of item i (or its radius and angle in degrees); '
     'both see the same a, b, c<br>'
-    '<b>Vary each copy</b> each field is a formula of its own, evaluated for every copy: '
-    'rotation in degrees <i>b * i</i> · size as a scale factor <i>1 + 0.1 * i</i> · '
-    'diameter of circles <i>a + 0.1 * i</i> · QRD diffuser depth (6 copies, the original is well 0) '
-    '<i>a * ((i * i) % 7) / 7</i>'
+    '<b>Vary each copy</b> each field is a formula of its own, evaluated for every copy (i = 2 …): '
+    'rotation in degrees <i>b * (i - 1)</i> · size as a scale factor <i>i^1.4</i> or <i>1.2^(i - 1)</i> · '
+    'diameter of circles <i>a + 0.1 * (i - 1)</i> · QRD diffuser depth (6 copies, the original is well 0) '
+    '<i>a * (((i - 1) * (i - 1)) % 7) / 7</i>'
 )

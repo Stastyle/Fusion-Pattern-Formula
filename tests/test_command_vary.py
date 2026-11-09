@@ -6,6 +6,7 @@ Run from the repo root:  python -m unittest discover -s tests -v
 """
 import json
 import math
+import re
 import unittest
 from unittest import mock
 
@@ -140,7 +141,7 @@ class PathType(VaryHarness):
         self.choose(cmd, C.ID_PRESET, 'Archimedean spiral')
         self.assertEqual(dialog.preset_id, 'spiral')
         self.assertEqual(dialog.formula_text, 'a * t')
-        self.assertEqual(dialog.formula2_text, 'b * i')
+        self.assertEqual(dialog.formula2_text, 'b * (i - 1)')
         self.assertTrue(dialog.polar)
         self.assertAlmostEqual(dialog.a, 100.0)
         self.assertAlmostEqual(dialog.b, 30.0)
@@ -148,9 +149,9 @@ class PathType(VaryHarness):
         self.assertIn('Formula = radius', notes)
         self.assertIn('angle in degrees', notes)
         self.assertIn('radius of the last copy', notes)
-        self.assertIn('i = 1: (', self.preview_text(cmd))
+        self.assertIn('i = 2: (', self.preview_text(cmd))
         self.choose(cmd, C.ID_PRESET, 'Sine wave')
-        self.assertEqual(dialog.formula_text, 'a * i')
+        self.assertEqual(dialog.formula_text, 'a * (i - 1)')
         self.assertEqual(dialog.formula2_text, 'b * sin(2 * pi * t * c)')
         self.assertFalse(dialog.polar)
         self.assertAlmostEqual(dialog.c, 1.0)
@@ -213,37 +214,37 @@ class PathType(VaryHarness):
         text = self.preview_text(cmd)
         self.assertIn('3 copies', text)
         self.assertIn('farthest copy 30 mm', text)
-        self.assertIn('i = 1: (10, 0) mm', text)
-        self.assertIn('i = 3: (30, 0) mm', text)
-        self.set_text(cmd, C.ID_ROTATION, '5 * i')
-        self.assertIn('i = 2: (20, 0) mm · turn 10°', self.preview_text(cmd))
-        self.set_text(cmd, C.ID_SIZE, '1 + i')
+        self.assertIn('i = 2: (10, 0) mm', text)
+        self.assertIn('i = 4: (30, 0) mm', text)
+        self.set_text(cmd, C.ID_ROTATION, '5 * (i - 1)')
+        self.assertIn('i = 3: (20, 0) mm · turn 10°', self.preview_text(cmd))
+        self.set_text(cmd, C.ID_SIZE, '1 + (i - 1)')
         self.assertIn('· turn 10° · ×3', self.preview_text(cmd))
         self.choose(cmd, C.ID_SIZE_KIND, 'Diameter (circles)')
         self.assertIn('· ⌀3 mm', self.preview_text(cmd))
         self.choose(cmd, C.ID_OBJECT_TYPE, 'Profiles')
-        self.set_text(cmd, C.ID_DEPTH, 'a * i')
+        self.set_text(cmd, C.ID_DEPTH, 'a * (i - 1)')
         self.assertIn('· depth 20 mm', self.preview_text(cmd))
 
     def test_spec_carries_the_new_fields(self):
         cmd, dialog = self.open_dialog()
         self.choose(cmd, C.ID_TYPE, 'Path')
         self.choose(cmd, C.ID_PRESET, 'Logarithmic spiral')
-        self.set_text(cmd, C.ID_ROTATION, ' b * i ')
-        self.set_text(cmd, C.ID_SIZE, '1 + 0.1 * i')
+        self.set_text(cmd, C.ID_ROTATION, ' b * (i - 1) ')
+        self.set_text(cmd, C.ID_SIZE, '1 + 0.1 * (i - 1)')
         self.choose(cmd, C.ID_SIZE_KIND, 'Diameter (circles)')
         self.choose(cmd, C.ID_OBJECT_TYPE, 'Profiles')
-        self.set_text(cmd, C.ID_DEPTH, 'a * ((i * i) % 7) / 7')
+        self.set_text(cmd, C.ID_DEPTH, 'a * (((i - 1) * (i - 1)) % 7) / 7')
         spec = dialog.spec()
         self.assertTrue(spec.path)
         self.assertFalse(spec.circular)
-        self.assertEqual(spec.formula, 'a * b^i')
-        self.assertEqual(spec.formula2, 'c * i')
+        self.assertEqual(spec.formula, 'a * b^(i - 1)')
+        self.assertEqual(spec.formula2, 'c * (i - 1)')
         self.assertTrue(spec.polar)
-        self.assertEqual(spec.rotation, 'b * i')
-        self.assertEqual(spec.size, '1 + 0.1 * i')
+        self.assertEqual(spec.rotation, 'b * (i - 1)')
+        self.assertEqual(spec.size, '1 + 0.1 * (i - 1)')
         self.assertEqual(spec.size_kind, C.engine.SIZE_DIAMETER)
-        self.assertEqual(spec.depth, 'a * ((i * i) % 7) / 7')
+        self.assertEqual(spec.depth, 'a * (((i - 1) * (i - 1)) % 7) / 7')
         self.assertTrue(dialog.transform_mode)
         self.choose(cmd, C.ID_OBJECT_TYPE, 'Bodies')
         self.assertEqual(dialog.spec().depth, '', 'depth only counts for profiles')
@@ -386,10 +387,10 @@ class ValidationMessages(VaryHarness):
         self.select(cmd, C.ID_OBJECTS, adsk.fusion.Entity('top', 'BRepFace'))
         self.select(cmd, C.ID_DIRECTION, self.x_edge)
         self.assertFine(cmd)
-        self.set_text(cmd, C.ID_ROTATION, 'b * i')
+        self.set_text(cmd, C.ID_ROTATION, 'b * (i - 1)')
         self.assertProblem(cmd, message)
         self.set_text(cmd, C.ID_ROTATION, '')
-        self.set_text(cmd, C.ID_SIZE, '1 + i')
+        self.set_text(cmd, C.ID_SIZE, '1 + (i - 1)')
         self.assertProblem(cmd, message)
         self.set_text(cmd, C.ID_SIZE, '')
         self.assertFine(cmd)
@@ -402,7 +403,7 @@ class ValidationMessages(VaryHarness):
     def test_rotation_needs_an_axis_outside_a_sketch(self):
         cmd, dialog = self.open_dialog()
         self.ready_bodies(cmd)
-        self.set_text(cmd, C.ID_ROTATION, '10 * i')
+        self.set_text(cmd, C.ID_ROTATION, '10 * (i - 1)')
         self.assertProblem(cmd, 'Rotation needs a rotation axis')
         self.select(cmd, C.ID_ROTATION_AXIS, self.axis('z', (0, 0, 0), (0, 0, 1)))
         self.assertFine(cmd)
@@ -418,13 +419,13 @@ class ValidationMessages(VaryHarness):
         self.select(cmd, C.ID_OBJECTS, self.root.occurrences.item(0))
         self.select(cmd, C.ID_DIRECTION, self.x_edge)
         self.assertFine(cmd)
-        self.set_text(cmd, C.ID_SIZE, '1 + 0.1 * i')
+        self.set_text(cmd, C.ID_SIZE, '1 + 0.1 * (i - 1)')
         self.assertProblem(cmd, 'Size does not apply to components')
 
     def test_size_needs_a_point_to_scale_bodies_and_profiles_about(self):
         cmd, dialog = self.open_dialog()
         self.ready_bodies(cmd)
-        self.set_text(cmd, C.ID_SIZE, '1 + 0.1 * i')
+        self.set_text(cmd, C.ID_SIZE, '1 + 0.1 * (i - 1)')
         self.assertProblem(cmd, 'Size needs a point to scale about')
         self.select(cmd, C.ID_SCALE_POINT, self.vertex('corner', (0, 0, 0)))
         self.assertFine(cmd)
@@ -441,7 +442,7 @@ class ValidationMessages(VaryHarness):
         cmd, dialog = self.open_dialog()
         self.ready_bodies(cmd)
         self.select(cmd, C.ID_SCALE_POINT, self.vertex('corner', (0, 0, 0)))
-        self.set_text(cmd, C.ID_SIZE, 'a + i')
+        self.set_text(cmd, C.ID_SIZE, 'a + (i - 1)')
         self.choose(cmd, C.ID_SIZE_KIND, 'Diameter (circles)')
         self.assertProblem(cmd, 'Diameter needs sketch circles')
         sketch = adsk.fusion.Sketch('Holes')
@@ -467,7 +468,7 @@ class ValidationMessages(VaryHarness):
         self.select(cmd, C.ID_OBJECTS, sketch.profile('well'))
         self.select(cmd, C.ID_DIRECTION, self.x_edge)
         self.assertProblem(cmd, 'Profiles need a Depth formula')
-        self.set_text(cmd, C.ID_DEPTH, 'a * i')
+        self.set_text(cmd, C.ID_DEPTH, 'a * (i - 1)')
         self.assertFine(cmd)
         self.choose(cmd, C.ID_OPERATION, 'Cut')
         self.assertProblem(cmd, 'Join and Cut need a Target body')
@@ -482,16 +483,16 @@ class ValidationMessages(VaryHarness):
         self.choose(cmd, C.ID_OBJECT_TYPE, 'Profiles')
         self.select(cmd, C.ID_OBJECTS, sketch.profile('well'))
         self.select(cmd, C.ID_DIRECTION, self.x_edge)
+        self.set_text(cmd, C.ID_DEPTH, 'a * (i - 2)')
+        self.assertProblem(cmd, 'Depth is 0 at i = 2')
         self.set_text(cmd, C.ID_DEPTH, 'a * (i - 1)')
-        self.assertProblem(cmd, 'Copy 1 has depth 0')
-        self.set_text(cmd, C.ID_DEPTH, 'a * i')
         self.set_text(cmd, C.ID_ROTATION, 'b *')
         self.assertFalse(self.validate(cmd))
         self.assertIn('Rotation', self.preview_text(cmd))
         self.set_text(cmd, C.ID_ROTATION, '')
         self.select(cmd, C.ID_SCALE_POINT, self.vertex('corner', (0, 0, 0)))
-        self.set_text(cmd, C.ID_SIZE, 'i - 1')
-        self.assertProblem(cmd, 'Copy 1: size must be greater than 0')
+        self.set_text(cmd, C.ID_SIZE, 'i - 2')
+        self.assertProblem(cmd, 'Size at i = 2 must be greater than 0')
         self.choose(cmd, C.ID_TYPE, 'Path')
         self.select(cmd, C.ID_DIRECTION2, self.y_edge)
         self.set_text(cmd, C.ID_SIZE, '')
@@ -499,7 +500,7 @@ class ValidationMessages(VaryHarness):
         self.assertProblem(cmd, 'The Y formula is empty')
         self.set_text(cmd, C.ID_FORMULA2, '0')
         self.set_text(cmd, C.ID_FORMULA, '0')
-        self.assertProblem(cmd, 'Copy 1 lands on the original')
+        self.assertProblem(cmd, 'The copy at i = 2 lands on the original')
 
 
 # ---------------------------------------------------------------------------
@@ -523,7 +524,7 @@ class BuildingBodies(VaryHarness):
         self.select(cmd, C.ID_OBJECTS, self.block)
         self.select(cmd, C.ID_DIRECTION, self.x_edge)
         self.select(cmd, C.ID_DIRECTION2, self.y_edge)
-        self.set_text(cmd, C.ID_FORMULA2, '5 * i')
+        self.set_text(cmd, C.ID_FORMULA2, '5 * (i - 1)')
         self.set_count(cmd, 3)
         self.assertTrue(self.preview(cmd).isValidResult, self.preview_text(cmd))
         self.assertEqual([b.name for b in self.new_bodies()], ['Block (1)', 'Block (2)', 'Block (3)'])
@@ -537,14 +538,14 @@ class BuildingBodies(VaryHarness):
         self.select(cmd, C.ID_OBJECTS, self.block)
         self.select(cmd, C.ID_DIRECTION, along_y)
         self.select(cmd, C.ID_DIRECTION2, tilted)
-        self.set_text(cmd, C.ID_FORMULA2, '5 * i')      # X formula is 'a * i' with a = 10 mm
+        self.set_text(cmd, C.ID_FORMULA2, '5 * (i - 1)')      # X formula is 'a * (i - 1)' with a = 10 mm
         self.set_count(cmd, 3)
         args = self.preview(cmd)
         self.assertTrue(args.isValidResult, self.preview_text(cmd))
 
         bodies = self.new_bodies()
         self.assertEqual(len(bodies), 3)
-        # copy i: x_i = 10 i mm along +Y, y_i = 5 i mm along +X (the tilted edge minus its Y part)
+        # copy k (item i = k + 1): x = 10 k mm along +Y, y = 5 k mm along +X (the tilted edge minus its Y part)
         self.assertXYZ(bodies[0].location(), (0.5, 1.0, 0.0))
         self.assertXYZ(bodies[1].location(), (1.0, 2.0, 0.0))
         self.assertXYZ(bodies[2].location(), (1.5, 3.0, 0.0))
@@ -565,7 +566,7 @@ class BuildingBodies(VaryHarness):
         self.assertEqual(move_feature.attributes.itemByName('FormulaPattern', 'pattern').value, pattern_id)
         stored = json.loads(copy_feature.attributes.itemByName('FormulaPattern', 'settings').value)
         self.assertEqual(stored['pattern_type'], 'path')
-        self.assertEqual(stored['formula2'], '5 * i')
+        self.assertEqual(stored['formula2'], '5 * (i - 1)')
         self.assertEqual(stored['coords'], 'xy')
         self.assertEqual(stored['tokens']['objects'], [self.block.entityToken])
         self.assertEqual(stored['tokens']['direction'], along_y.entityToken)
@@ -585,7 +586,7 @@ class BuildingBodies(VaryHarness):
         self.select(cmd, C.ID_DIRECTION2, self.y_edge)
         self.choose(cmd, C.ID_COORDS, 'Radius / Angle')
         self.set_text(cmd, C.ID_FORMULA, 'a')          # radius 10 mm
-        self.set_text(cmd, C.ID_FORMULA2, '90 * i')     # 90°, 180°
+        self.set_text(cmd, C.ID_FORMULA2, '90 * (i - 1)')     # 90°, 180°
         self.set_count(cmd, 2)
         self.assertTrue(self.preview(cmd).isValidResult, self.preview_text(cmd))
         bodies = self.new_bodies()
@@ -603,7 +604,7 @@ class BuildingBodies(VaryHarness):
         cmd, dialog = self.open_dialog()
         self.select(cmd, C.ID_OBJECTS, self.block, off_axis)     # Block sits on the axis
         self.select(cmd, C.ID_DIRECTION, self.x_edge)
-        self.set_text(cmd, C.ID_ROTATION, '90 * i')
+        self.set_text(cmd, C.ID_ROTATION, '90 * (i - 1)')
         self.select(cmd, C.ID_ROTATION_AXIS, z_axis)
         self.set_count(cmd, 2)
         self.assertTrue(self.preview(cmd).isValidResult, self.preview_text(cmd))
@@ -625,7 +626,7 @@ class BuildingBodies(VaryHarness):
         self.assertEqual(self.root.features.scaleFeatures.count, 0)
         self.assertEqual(self.root.features.rectangularPatternFeatures.count, 0)
         stored = json.loads(moves[0].attributes.itemByName('FormulaPattern', 'settings').value)
-        self.assertEqual(stored['rotation'], '90 * i')
+        self.assertEqual(stored['rotation'], '90 * (i - 1)')
         self.assertEqual(stored['tokens']['rotation_axis'], z_axis.entityToken)
 
     def test_circular_pattern_with_rotation_uses_the_transform_engine(self):
@@ -652,7 +653,7 @@ class BuildingBodies(VaryHarness):
         cmd, dialog = self.open_dialog()
         self.select(cmd, C.ID_OBJECTS, self.block)
         self.select(cmd, C.ID_DIRECTION, self.x_edge)
-        self.set_text(cmd, C.ID_SIZE, '1 + i')
+        self.set_text(cmd, C.ID_SIZE, '1 + (i - 1)')
         self.select(cmd, C.ID_SCALE_POINT, corner)
         self.set_count(cmd, 2)
         self.assertTrue(self.preview(cmd).isValidResult, self.preview_text(cmd))
@@ -676,7 +677,7 @@ class BuildingBodies(VaryHarness):
         self.select(cmd, C.ID_OBJECTS, self.block)
         self.select(cmd, C.ID_DIRECTION, self.x_edge)
         self.select(cmd, C.ID_DIRECTION2, self.y_edge)
-        self.set_text(cmd, C.ID_FORMULA2, '5 * i')
+        self.set_text(cmd, C.ID_FORMULA2, '5 * (i - 1)')
         self.root.features.moveFeatures.fail_at = 2
         args = self.preview(cmd)
         self.assertFalse(args.isValidResult)
@@ -692,7 +693,7 @@ class BuildingBodies(VaryHarness):
         cmd, dialog = self.open_dialog()
         self.select(cmd, C.ID_OBJECTS, self.block)
         self.select(cmd, C.ID_DIRECTION, adsk.fusion.Entity('rim', 'BRepFace'))   # no line geometry
-        self.set_text(cmd, C.ID_ROTATION, '10 * i')
+        self.set_text(cmd, C.ID_ROTATION, '10 * (i - 1)')
         self.select(cmd, C.ID_ROTATION_AXIS, self.x_edge)
         args = self.preview(cmd)
         self.assertFalse(args.isValidResult)
@@ -724,7 +725,7 @@ class BuildingComponents(VaryHarness):
         self.select(cmd, C.ID_OBJECTS, original)
         self.select(cmd, C.ID_DIRECTION, self.edge('x', (0, 0, 0), (1, 0, 0)))
         self.select(cmd, C.ID_DIRECTION2, self.edge('y', (0, 0, 0), (0, 1, 0)))
-        self.set_text(cmd, C.ID_FORMULA2, '5 * i')
+        self.set_text(cmd, C.ID_FORMULA2, '5 * (i - 1)')
         self.set_count(cmd, 2)
         self.assertTrue(self.preview(cmd).isValidResult, self.preview_text(cmd))
 
@@ -779,7 +780,7 @@ class BuildingProfiles(VaryHarness):
 
     def test_each_copy_is_extruded_by_its_own_signed_depth_moved_and_cut_from_the_target(self):
         cmd, dialog = self.open_dialog()
-        self.ready_profiles(cmd, 'a * (2 * i - 3)', 3)       # -10, +10, +30 mm
+        self.ready_profiles(cmd, 'a * (2 * (i - 1) - 3)', 3)       # -10, +10, +30 mm
         self.choose(cmd, C.ID_OPERATION, 'Cut')
         self.select(cmd, C.ID_TARGET, self.block)
         self.assertTrue(self.preview(cmd).isValidResult, self.preview_text(cmd))
@@ -815,7 +816,7 @@ class BuildingProfiles(VaryHarness):
         self.assertEqual(rows, ['ExtrudeFeature', 'MoveFeature'] * 3 + ['CombineFeature'])
         stored = json.loads(extrudes[0].attributes.itemByName('FormulaPattern', 'settings').value)
         self.assertEqual(stored['object_type'], 'Profiles')
-        self.assertEqual(stored['depth'], 'a * (2 * i - 3)')
+        self.assertEqual(stored['depth'], 'a * (2 * (i - 1) - 3)')
         self.assertEqual(stored['operation'], 2)
         self.assertEqual(stored['tokens']['target'], self.block.entityToken)
         self.assertEqual(stored['tokens']['objects'], [self.well.entityToken])
@@ -894,8 +895,8 @@ class BuildingSketchCopies(VaryHarness):
         cmd, dialog = self.open_dialog()
         self.choose(cmd, C.ID_TYPE, 'Path')
         self.select(cmd, C.ID_OBJECTS, self.hole)
-        self.set_text(cmd, C.ID_FORMULA2, '5 * i')
-        self.set_text(cmd, C.ID_SIZE, 'a + 2 * i')         # 12 mm, 14 mm
+        self.set_text(cmd, C.ID_FORMULA2, '5 * (i - 1)')
+        self.set_text(cmd, C.ID_SIZE, 'a + 2 * (i - 1)')         # 12 mm, 14 mm
         self.choose(cmd, C.ID_SIZE_KIND, 'Diameter (circles)')
         self.set_count(cmd, 2)
         self.assertTrue(self.preview(cmd).isValidResult, self.preview_text(cmd))
@@ -925,7 +926,7 @@ class BuildingSketchCopies(VaryHarness):
         self.choose(cmd, C.ID_TYPE, 'Path')
         self.select(cmd, C.ID_OBJECTS, self.hole)
         self.select(cmd, C.ID_DIRECTION, line)
-        self.set_text(cmd, C.ID_FORMULA2, '5 * i')
+        self.set_text(cmd, C.ID_FORMULA2, '5 * (i - 1)')
         self.set_count(cmd, 1)
         self.assertTrue(self.preview(cmd).isValidResult, self.preview_text(cmd))
         self.assertXYZ(self.copies()[0].geometry.center, (-0.5, 1.0, 0.0))
@@ -934,7 +935,7 @@ class BuildingSketchCopies(VaryHarness):
     def test_scale_factor_scales_each_copy_about_its_moved_centre(self):
         cmd, dialog = self.open_dialog()
         self.select(cmd, C.ID_OBJECTS, self.hole)
-        self.set_text(cmd, C.ID_SIZE, '1 + i')              # ×2, ×3
+        self.set_text(cmd, C.ID_SIZE, '1 + (i - 1)')              # ×2, ×3
         self.set_count(cmd, 2)
         self.assertTrue(self.validate(cmd), 'no scale point needed in a sketch')
         self.assertTrue(self.preview(cmd).isValidResult, self.preview_text(cmd))
@@ -978,7 +979,7 @@ class BuildingSketchCopies(VaryHarness):
         self.select(cmd, C.ID_OBJECTS, spoke_hole)
         self.select(cmd, C.ID_AXIS, hub)
         self.set_expression(cmd, C.ID_A_ANG, '90 deg')
-        self.set_text(cmd, C.ID_SIZE, '4 + 2 * i')          # 6 mm, 8 mm
+        self.set_text(cmd, C.ID_SIZE, '4 + 2 * (i - 1)')          # 6 mm, 8 mm
         self.choose(cmd, C.ID_SIZE_KIND, 'Diameter (circles)')
         self.set_count(cmd, 2)
         self.assertTrue(self.preview(cmd).isValidResult, self.preview_text(cmd))
@@ -1035,11 +1036,11 @@ class EditingTransformedPatterns(VaryHarness):
         self.select(cmd, C.ID_OBJECTS, self.block)
         self.select(cmd, C.ID_DIRECTION, self.x_edge)
         self.select(cmd, C.ID_DIRECTION2, self.y_edge)
-        self.set_text(cmd, C.ID_FORMULA2, '5 * i')
+        self.set_text(cmd, C.ID_FORMULA2, '5 * (i - 1)')
         if vary:
-            self.set_text(cmd, C.ID_ROTATION, '10 * i')
+            self.set_text(cmd, C.ID_ROTATION, '10 * (i - 1)')
             self.select(cmd, C.ID_ROTATION_AXIS, self.z_axis)
-            self.set_text(cmd, C.ID_SIZE, '1 + 0.1 * i')
+            self.set_text(cmd, C.ID_SIZE, '1 + 0.1 * (i - 1)')
             self.select(cmd, C.ID_SCALE_POINT, self.corner)
         self.set_count(cmd, count)
         self.set_text(cmd, C.ID_GROUP_NAME, group)
@@ -1070,9 +1071,9 @@ class EditingTransformedPatterns(VaryHarness):
         self.assertEqual(dialog.editing.kind, 'features')
         self.assertTrue(dialog.path)
         self.assertEqual(dialog.count, 3)
-        self.assertEqual(dialog.formula2_text, '5 * i')
-        self.assertEqual(dialog.rotation_text, '10 * i')
-        self.assertEqual(dialog.size_text, '1 + 0.1 * i')
+        self.assertEqual(dialog.formula2_text, '5 * (i - 1)')
+        self.assertEqual(dialog.rotation_text, '10 * (i - 1)')
+        self.assertEqual(dialog.size_text, '1 + 0.1 * (i - 1)')
         self.assertEqual(dialog.group_name, 'Dots')
         self.assertEqual(self.selected(cmd, C.ID_OBJECTS), [self.block])
         self.assertEqual(self.selected(cmd, C.ID_DIRECTION), [self.x_edge])
@@ -1179,7 +1180,7 @@ class EditingTransformedPatterns(VaryHarness):
         self.choose(cmd, C.ID_OBJECT_TYPE, 'Components')
         self.select(cmd, C.ID_OBJECTS, original)
         self.select(cmd, C.ID_DIRECTION, self.x_edge)
-        self.set_text(cmd, C.ID_ROTATION, '15 * i')
+        self.set_text(cmd, C.ID_ROTATION, '15 * (i - 1)')
         self.select(cmd, C.ID_ROTATION_AXIS, self.z_axis)
         self.set_count(cmd, 2)
         self.assertTrue(self.preview(cmd).isValidResult, self.preview_text(cmd))
@@ -1210,7 +1211,7 @@ class EditingTransformedPatterns(VaryHarness):
         self.choose(cmd, C.ID_OBJECT_TYPE, 'Profiles')
         self.select(cmd, C.ID_OBJECTS, well)
         self.select(cmd, C.ID_DIRECTION, self.x_edge)
-        self.set_text(cmd, C.ID_DEPTH, 'a * i')
+        self.set_text(cmd, C.ID_DEPTH, 'a * (i - 1)')
         self.choose(cmd, C.ID_OPERATION, 'Cut')
         self.select(cmd, C.ID_TARGET, self.block)
         self.set_count(cmd, 2)
@@ -1222,7 +1223,7 @@ class EditingTransformedPatterns(VaryHarness):
         cmd, dialog = self.open_dialog()
         self.pick(cmd, 'Formula Pattern (2 copies)')
         self.assertEqual(dialog.object_type, 'Profiles')
-        self.assertEqual(dialog.depth_text, 'a * i')
+        self.assertEqual(dialog.depth_text, 'a * (i - 1)')
         self.assertEqual(dialog.operation, 2)
         self.assertTrue(self.visible(cmd, C.ID_TARGET))
         self.assertEqual(self.selected(cmd, C.ID_TARGET), [self.block])
@@ -1243,8 +1244,8 @@ class EditingTransformedPatterns(VaryHarness):
         cmd, dialog = self.open_dialog()
         self.choose(cmd, C.ID_TYPE, 'Path')
         self.select(cmd, C.ID_OBJECTS, hole)
-        self.set_text(cmd, C.ID_FORMULA2, '5 * i')
-        self.set_text(cmd, C.ID_SIZE, 'a + 2 * i')
+        self.set_text(cmd, C.ID_FORMULA2, '5 * (i - 1)')
+        self.set_text(cmd, C.ID_SIZE, 'a + 2 * (i - 1)')
         self.choose(cmd, C.ID_SIZE_KIND, 'Diameter (circles)')
         self.set_count(cmd, 2)
         self.assertTrue(self.preview(cmd).isValidResult, self.preview_text(cmd))
@@ -1259,7 +1260,7 @@ class EditingTransformedPatterns(VaryHarness):
         self.assertEqual(dialog.object_type, 'Sketch curves')
         self.assertTrue(dialog.path)
         self.assertEqual(dialog.size_kind, C.engine.SIZE_DIAMETER)
-        self.assertEqual(dialog.size_text, 'a + 2 * i')
+        self.assertEqual(dialog.size_text, 'a + 2 * (i - 1)')
         self.assertEqual(self.selected(cmd, C.ID_OBJECTS), [hole])
         self.assertEqual(self.selected(cmd, C.ID_DIRECTION), [])
         self.assertEqual(self.highlighted(cmd), old, 'the copied circles are highlighted')
@@ -1294,7 +1295,7 @@ class EditingTransformedPatterns(VaryHarness):
         cmd, dialog = self.open_dialog()
         self.choose(cmd, C.ID_TYPE, 'Path')
         self.select(cmd, C.ID_OBJECTS, hole)
-        self.set_text(cmd, C.ID_FORMULA2, '5 * i')
+        self.set_text(cmd, C.ID_FORMULA2, '5 * (i - 1)')
         self.set_count(cmd, 2)
         self.assertTrue(self.preview(cmd).isValidResult, self.preview_text(cmd))
         self.finish(cmd)
@@ -1357,7 +1358,7 @@ class SettingsVary(VaryHarness):
         cmd, dialog = self.open_dialog()
         self.choose(cmd, C.ID_TYPE, 'Path')
         self.choose(cmd, C.ID_PRESET, 'Sunflower (phyllotaxis)')
-        self.set_text(cmd, C.ID_ROTATION, '137.5 * i')
+        self.set_text(cmd, C.ID_ROTATION, '137.5 * (i - 1)')
         self.set_text(cmd, C.ID_SIZE, 'a / 2')
         self.choose(cmd, C.ID_SIZE_KIND, 'Diameter (circles)')
         self.choose(cmd, C.ID_OBJECT_TYPE, 'Profiles')
@@ -1368,21 +1369,22 @@ class SettingsVary(VaryHarness):
         saved = self.saved[0]
         self.assertEqual(saved['pattern_type'], 'path')
         self.assertEqual(saved['coords'], 'polar')
-        self.assertEqual(saved['formula2'], 'i * 137.508')
-        self.assertEqual(saved['rotation'], '137.5 * i')
+        self.assertEqual(saved['formula2'], '(i - 1) * 137.508')
+        self.assertEqual(saved['rotation'], '137.5 * (i - 1)')
         self.assertEqual(saved['size'], 'a / 2')
         self.assertEqual(saved['size_kind'], 'diameter')
         self.assertEqual(saved['depth'], 'a * t')
         self.assertEqual(saved['operation'], 1)
         self.assertNotIn('tokens', saved, 'the settings file never names entities')
+        self.assertEqual(saved['numbering'], 'item')
 
         with mock.patch.object(test_command.command, 'load_settings', return_value=saved):
             cmd, dialog = self.open_dialog()
         self.assertTrue(dialog.path)
         self.assertTrue(dialog.polar)
         self.assertEqual(dialog.preset_id, 'phyllotaxis')
-        self.assertEqual(dialog.formula2_text, 'i * 137.508')
-        self.assertEqual(dialog.rotation_text, '137.5 * i')
+        self.assertEqual(dialog.formula2_text, '(i - 1) * 137.508')
+        self.assertEqual(dialog.rotation_text, '137.5 * (i - 1)')
         self.assertEqual(dialog.size_text, 'a / 2')
         self.assertEqual(dialog.size_kind, C.engine.SIZE_DIAMETER)
         self.assertEqual(dialog.object_type, 'Profiles')
@@ -1403,6 +1405,100 @@ class SettingsVary(VaryHarness):
         self.assertFalse(dialog.polar)
         self.assertEqual(dialog.rotation_text, '7')
         self.assertNotIn('Traceback', self.preview_text(cmd))
+
+
+# ---------------------------------------------------------------------------
+# Item numbering (1.3): the original is item i = 1, the copies are i = 2 … n + 1
+# ---------------------------------------------------------------------------
+
+class ItemNumbering(VaryHarness):
+    def setUp(self):
+        super().setUp()
+        self.block = self.root.body('Block')
+        self.x_edge = self.edge('x edge', (0, 0, 0), (1, 0, 0))
+        self.z_axis = self.axis('z axis', (0, 0, 0), (0, 0, 1))
+
+    def settings_attributes(self):
+        """The 'settings' attribute of every live entity of the design that carries one."""
+        found = []
+        for entity in self.timeline_entities() + list(self.root.bRepBodies):
+            attribute = entity.attributes.itemByName('FormulaPattern', 'settings')
+            if attribute is not None:
+                found.append(attribute)
+        return found
+
+    def test_a_fresh_dialog_offers_a_times_i_minus_1_and_previews_the_copies_from_i_2(self):
+        cmd, dialog = self.open_dialog()
+        self.assertEqual(dialog.formula_text, 'a * (i - 1)')
+        self.assertEqual(dialog.preset_id, 'custom')
+        text = self.preview_text(cmd)
+        self.assertEqual(re.search(r'i = \d+:', text).group(), 'i = 2:', 'the first row is the first copy, item 2')
+        self.assertIn('i = 2: 10 mm', text, 'one step from the original')
+        self.assertIn('i = 11: 100 mm', text)
+        self.assertIn('farthest copy 100 mm', text)
+        self.assertNotIn('i = 1:', text, 'the original has no row')
+
+    def test_a_pattern_saved_by_1_2_is_renumbered_when_it_is_loaded(self):
+        # 1.2.x wrote the copies' formulas with i = copy number (first copy 1) and no
+        # 'numbering' key. Loaded in 1.3 they must read (i - 1): the geometry does not shift.
+        cmd, dialog = self.open_dialog()
+        self.select(cmd, C.ID_OBJECTS, self.block)
+        self.select(cmd, C.ID_DIRECTION, self.x_edge)
+        self.set_text(cmd, C.ID_ROTATION, '30 * (i - 1)')
+        self.select(cmd, C.ID_ROTATION_AXIS, self.z_axis)
+        self.set_count(cmd, 2)
+        self.assertTrue(self.preview(cmd).isValidResult, self.preview_text(cmd))
+        self.finish(cmd)
+        attributes = self.settings_attributes()
+        self.assertTrue(attributes)
+        for attribute in attributes:
+            old = json.loads(attribute.value)
+            self.assertEqual(old['numbering'], 'item', '1.3 says which numbering it wrote')
+            self.assertEqual(old['formula'], 'a * (i - 1)')
+            del old['numbering']                        # what 1.2.x wrote for the same pattern
+            old['formula'] = 'a * i'
+            old['rotation'] = '30 * i'
+            attribute.value = json.dumps(old)
+
+        cmd, dialog = self.open_dialog()
+        self.assertEqual(self.list_names(cmd), ['New pattern', 'Formula Pattern (2 copies)'])
+        self.pick(cmd, 'Formula Pattern (2 copies)')
+        self.assertTrue(dialog.editing)
+        self.assertEqual(dialog.formula_text, 'a * (i - 1)')
+        self.assertEqual(dialog.rotation_text, '30 * (i - 1)')
+        self.assertEqual(self.selected(cmd, C.ID_OBJECTS), [self.block])
+        self.assertEqual(self.selected(cmd, C.ID_ROTATION_AXIS), [self.z_axis])
+        text = self.preview_text(cmd)
+        self.assertIn('i = 2: 10 mm · turn 30°', text, 'the first copy is where 1.2 put it')
+        self.assertIn('i = 3: 20 mm · turn 60°', text)
+        self.assertTrue(self.validate(cmd))
+        self.assertFalse(self.preview(cmd).isValidResult, 'renumbering is not a change: nothing is rebuilt')
+
+        self.set_count(cmd, 3)
+        self.assertTrue(self.preview(cmd).isValidResult, self.preview_text(cmd))
+        copies = [b for b in self.root.bRepBodies if b is not self.block]
+        self.assertEqual(len(copies), 3)
+        self.assertXYZ(copies[0].location(), (1.0, 0.0, 0.0), 'the rebuilt first copy is still 10 mm out')
+        rebuilt = [json.loads(a.value) for a in self.settings_attributes()]
+        self.assertTrue(rebuilt)
+        for stored in rebuilt:
+            self.assertEqual(stored['numbering'], 'item', 'written back in the new numbering')
+            self.assertEqual(stored['formula'], 'a * (i - 1)')
+            self.assertEqual(stored['rotation'], '30 * (i - 1)')
+            self.assertEqual(stored['count'], 3)
+
+    def test_modern_settings_renumbers_what_1_2_wrote_and_leaves_1_3_settings_alone(self):
+        old = {'formula': 'a * i', 'size': 'i^1.4', 'depth': ''}
+        new = C._modern_settings(old)
+        self.assertEqual(new, {'formula': 'a * (i - 1)', 'size': '(i - 1)^1.4', 'depth': '', 'numbering': 'item'})
+        self.assertEqual(old, {'formula': 'a * i', 'size': 'i^1.4', 'depth': ''}, 'the dict given is left alone')
+        # only a bare i is renumbered: names and functions with an i in them are not
+        mixed = C._modern_settings({'formula2': 'b * sin(2 * pi * t) + fib(i)', 'rotation': 'twist * i'})
+        self.assertEqual(mixed['formula2'], 'b * sin(2 * pi * t) + fib((i - 1))')
+        self.assertEqual(mixed['rotation'], 'twist * (i - 1)')
+        modern = {'formula': 'a * i', 'rotation': 'b * i', 'size': 'i^1.4', 'numbering': 'item'}
+        self.assertEqual(C._modern_settings(dict(modern)), modern, 'i already means the item: unchanged')
+        self.assertEqual(C._modern_settings({}), {})
 
 
 if __name__ == '__main__':

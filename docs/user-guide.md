@@ -77,17 +77,17 @@ Stop, so no Fusion restart is needed.
 | **Direction**, **Direction 2 (Y)** (path) | The two directions that span the plane of the path: *Direction* is X, *Direction 2* is Y and is made perpendicular to it. In a sketch the path uses the sketch's X and Y axes, or the chosen line and its in-plane perpendicular, so only *Direction* is offered. |
 | **Axis** (circular) | A linear edge, construction axis, sketch line, circular edge, sketch circle, or a cylindrical / conical / toroidal face. In a sketch: a sketch point, or a circle to use its centre. |
 | **Flip direction** | Mirrors the pattern to the other side of the original (negative distances / angles). |
-| **Copies** | How many *new* copies, 1 … 1000. The original stays where it is and is copy 0; the formula runs for `i = 1 … Copies`. |
+| **Copies** | How many *new* copies, 1 … 1000. The original stays where it is and is item `i = 1`; the formulas run for the copies, `i = 2 … Copies + 1`. |
 | **Preset** | Ready-made formulas (see [Presets](#4-presets)). Picking one fills in the formula, the mode and `a b c`. Editing any of them switches the preset to *Custom* without losing your values. |
-| **Formula gives** | *Distance from original* (or *Angle from original*): the formula is where copy `i` sits, measured from the original. *Gap to previous* (or *Angle step from previous*): the formula is the step from copy `i-1` to copy `i`; the positions add up. |
+| **Formula gives** | *Distance from original* (or *Angle from original*): the formula is where item `i` sits, measured from the original. *Gap to previous* (or *Angle step from previous*): the formula is the step from item `i-1` to item `i`; the positions add up. |
 | **Formula** | The rule. See [Writing a formula](#5-writing-a-formula). |
 | **Coordinates** (path) | *X / Y*: the two formulas are offsets along Direction and Direction 2. *Radius / Angle*: the first formula is the distance from the original, the second the angle in degrees, measured from Direction. |
 | **Formula**, **Second formula** (path) | The two rules: X and Y, or radius and angle; the note under them says which. Both see the same `i n t a b c`. |
 | **a** | A value for the formula with units: a length for linear and path patterns, an angle for circular ones. Expressions and units work, e.g. `25.5 in` or `scale / 2`. |
 | **b, c** | Plain numbers for the formula. |
 | **Vary each copy** (collapsed group) | Formulas that change every copy on top of its position. An empty field means "no change". These need bodies, components, sketch curves or profiles; faces and features cannot be rotated or scaled one by one. |
-| **Rotation**, **Rotation axis** | Degrees to turn copy `i` about the axis (a linear edge, construction axis or sketch line) before it moves into place, so copies spin about the *original's* axis. In a sketch the field takes a sketch point to turn about; left empty, the copies turn about the centre of the selected curves. Example `b * i`. |
-| **Size**, **Size gives**, **Scale about** | *Scale factor*: copy `i` is scaled by the formula (1 = unchanged) about the chosen point (a vertex, sketch point or construction point). *Diameter (circles)*: for sketch circles, the formula is the copy's diameter in document units. Not available for components. |
+| **Rotation**, **Rotation axis** | Degrees to turn item `i` about the axis (a linear edge, construction axis or sketch line) before it moves into place, so copies spin about the *original's* axis. In a sketch the field takes a sketch point to turn about; left empty, the copies turn about the centre of the selected curves. Example `b * (i - 1)`. |
+| **Size**, **Size gives**, **Scale about** | *Scale factor*: item `i` is scaled by the formula (1 = unchanged) about the chosen point (a vertex, sketch point or construction point); `i^1.4` grows from the first copy. *Diameter (circles)*: for sketch circles, the formula is the copy's diameter in document units. Not available for components. |
 | **Depth**, **Operation**, **Target body** (profiles) | Each copy is the profile extruded by the formula's depth in document units. With *Cut* a positive depth goes into the target body, with *Join* away from it, with *New body* along the sketch's normal; a negative depth goes the other way. *New body* keeps the copies as separate bodies; *Join* / *Cut* merge them into, or cut them out of, the target body with one Combine feature. |
 | **Preview** | Every copy's position (and gap), the farthest copy, and any warnings or errors. Updates as you type. Closed by default; opens by itself when there is an error to show. |
 | **Show in model** | Builds the copies while the dialog is open. Switches itself off above 100 copies; the result is still built when you press OK. |
@@ -135,7 +135,7 @@ fret.
 ### 3.3 Louvres that get denser toward one end
 
 Pattern a slot feature or a body with the **Growing gaps (geometric)** preset:
-*Formula gives* = *Gap to previous*, formula `a * b^(i - 1)`, `a` = the first
+*Formula gives* = *Gap to previous*, formula `a * b^(i - 2)`, `a` = the first
 gap, `b` = the growth factor. `b = 0.9` makes each gap 10 % smaller than the
 one before; `b = 1.1` makes them grow.
 
@@ -152,7 +152,7 @@ Any user parameter of the design (MODIFY → Change Parameters) can be used by
 name. With a parameter `scale = 648 mm`:
 
 ```
-scale * (1 - 1 / 2^(i / 12))
+scale * (1 - 1 / 2^((i - 1) / 12))
 ```
 
 Lengths arrive in the document's units, angles in degrees, unitless
@@ -166,8 +166,8 @@ the parameter changes; run the command again.
    *Object type* **Bodies**, click the peg.
 2. **Direction** and **Direction 2 (Y)**: two edges of the base plate,
    or the X and Y axes under *Origin* in the browser.
-3. *Copies* `60`, preset **Sunflower (phyllotaxis)**: radius `a * sqrt(i)`,
-   angle `i * 137.508`. `a` sets how far apart the pegs end up.
+3. *Copies* `60`, preset **Sunflower (phyllotaxis)**: radius `a * sqrt(i - 1)`,
+   angle `(i - 1) * 137.508`. `a` sets how far apart the pegs end up.
 4. The preview lists every copy as `(x, y)`; the model shows the spiral.
    **OK**.
 
@@ -181,8 +181,8 @@ write two formulas of your own.
 
 In a sketch, draw one circle. **Formula Pattern**: *Object type* **Sketch
 curves**, click the circle (a window selection that also takes its centre
-point is fine), *Copies* `10`, formula `a * i` with `a = 8 mm`.
-Open **Vary each copy**, type `a + 0.1 * i` into **Size** and choose
+point is fine), *Copies* `10`, formula `a * (i - 1)` with `a = 8 mm`.
+Open **Vary each copy**, type `a + 0.1 * (i - 1)` into **Size** and choose
 **Diameter (circles)**. Every copy is a circle 0.1 mm wider than the one
 before, in a row 8 mm apart: extrude them all as a cut for a tolerance
 test, or as pins. **Scale factor** does the same for any sketch curves,
@@ -192,7 +192,7 @@ with a factor instead of a diameter.
 
 Model one louvre standing on the origin. *Pattern type* **Linear**,
 **Bodies**, click the louvre, *Direction*: the X axis, *Copies* `12`,
-formula `a * i`. Under **Vary each copy** set **Rotation** to `b * i` and
+formula `a * (i - 1)`. Under **Vary each copy** set **Rotation** to `b * (i - 1)` and
 **Rotation axis** to the Z axis (which runs through the louvre). With
 `b = 7.5` each copy is turned 7.5° more than the last. The rotation is
 about the original's axis, before the copy moves into place, so every
@@ -205,9 +205,9 @@ louvre turns about its own centre.
 1. Sketch one well (a rectangle) on the top face of a block.
 2. **Formula Pattern**, *Object type* **Profiles**, click the rectangle's
    profile, *Direction*: an edge of the block, *Copies* `6`, formula
-   `a * i` with `a` = the well pitch.
-3. **Vary each copy**: **Depth** `a * ((i * i) % 7) / 7` (the quadratic
-   residue sequence for N = 7; the original is well 0), **Operation**
+   `a * (i - 1)` with `a` = the well pitch.
+3. **Vary each copy**: **Depth** `a * (((i - 1) * (i - 1)) % 7) / 7` (the
+   quadratic residue sequence for N = 7; the original is well 0), **Operation**
    **Cut**, **Target body**: the block. **OK**.
 
 Each copy is an extrude of the profile by its own depth, moved into place,
@@ -225,24 +225,24 @@ bodies instead, or **Join** to add them.
 |---|---|---|---|
 | Custom | — | whatever you type | — |
 | Constant spacing | gap | `a` | a = gap |
-| Guitar frets (12-TET) · linear only | distance | `a * (1 - 1 / 2^(i / 12))` | a = scale length |
-| Growing gaps (geometric) | gap | `a * b^(i - 1)` | a = first gap, b = growth factor |
-| Growing gaps (arithmetic) | gap | `a + b * (i - 1)` | a = first gap, b = increase per gap |
+| Guitar frets (12-TET) · linear only | distance | `a * (1 - 1 / 2^((i - 1) / 12))` | a = scale length (the nut is item 1, item i is fret i − 1) |
+| Growing gaps (geometric) | gap | `a * b^(i - 2)` | a = first gap, b = growth factor |
+| Growing gaps (arithmetic) | gap | `a + b * (i - 2)` | a = first gap, b = increase per gap |
 | Ease in & out (sine) | distance | `a * (1 - cos(pi * t)) / 2` | a = total extent |
 | Ease in (power) | distance | `a * t^b` | a = total extent, b = curve (1 = even, 2 = quadratic) |
-| Fibonacci gaps | gap | `a * fib(i)` | a = first gap |
+| Fibonacci gaps | gap | `a * fib(i - 1)` | a = first gap |
 | Golden angle (phyllotaxis) · circular only | angle step | `a` | a = 137.508° |
 
 Path presets give two formulas:
 
 | Preset | Coordinates | First formula | Second formula | Tunables |
 |---|---|---|---|---|
-| Archimedean spiral | radius / angle | `a * t` | `b * i` | a = radius of the last copy, b = degrees per copy |
-| Logarithmic spiral | radius / angle | `a * b^i` | `c * i` | a = first radius, b = growth per copy, c = degrees per copy |
-| Sunflower (phyllotaxis) | radius / angle | `a * sqrt(i)` | `i * 137.508` | a = spacing |
-| Sine wave | X / Y | `a * i` | `b * sin(2 * pi * t * c)` | a = step, b = amplitude, c = waves |
+| Archimedean spiral | radius / angle | `a * t` | `b * (i - 1)` | a = radius of the last copy, b = degrees per copy |
+| Logarithmic spiral | radius / angle | `a * b^(i - 1)` | `c * (i - 1)` | a = first radius, b = growth per copy, c = degrees per copy |
+| Sunflower (phyllotaxis) | radius / angle | `a * sqrt(i - 1)` | `(i - 1) * 137.508` | a = spacing |
+| Sine wave | X / Y | `a * (i - 1)` | `b * sin(2 * pi * t * c)` | a = step, b = amplitude, c = waves |
 | Ellipse | X / Y | `a * cos(2 * pi * t)` | `b * sin(2 * pi * t)` | a, b = the two radii (the original sits at the centre) |
-| Grid (b per row) | X / Y | `a * (i % b)` | `a * floor(i / b)` | a = pitch, b = copies per row (the original is the first cell) |
+| Grid (b per row) | X / Y | `a * ((i - 1) % b)` | `a * floor((i - 1) / b)` | a = pitch, b = copies per row (the original is the first cell) |
 
 The notes under the tunables explain what `a`, `b` and `c` mean for the
 chosen preset.
@@ -255,9 +255,9 @@ chosen preset.
 
 | Name | Meaning |
 |---|---|
-| `i` | the copy number, 1 … n (the original is 0 and is never moved) |
+| `i` | the item number: the original is 1 (and is never changed), the copies are 2 … n + 1 |
 | `n` | the number of copies |
-| `t` | `i / n`, running from just above 0 to 1; handy for easing curves |
+| `t` | `(i - 1) / n`: 0 at the original, 1 at the last copy; handy for easing curves |
 | `a` | the *a* field, in document units (linear) or degrees (circular) |
 | `b`, `c` | the *b* and *c* fields, plain numbers |
 | user parameters | any user parameter of the design, by name |
@@ -276,14 +276,25 @@ chosen preset.
 Anything else (names, attribute access, indexing, string operations) is
 rejected: the evaluator only runs arithmetic.
 
+### Numbering
+
+The original is item `i = 1` and the formulas are evaluated for the copies,
+`i = 2 … n + 1`. The formula's value at `i = 1` is not used, so a formula
+can describe the whole row with the original included: `i^1.4` as a Size
+is 1 for the original and already ×2.64 for the first copy; `a * i^1.2` as
+a distance puts the first copy at `a · 2^1.2`. An even spacing is
+`a * (i - 1)`, a first gap of `a` in *Gap to previous* is `a * b^(i - 2)`.
+The timeline features are still named by copy, *Formula Pattern 3/12*
+being the third copy, item `i = 4`.
+
 ### Position or gap
 
 *Formula gives* chooses the meaning of the result:
 
 * **Distance from original** / **Angle from original**: the formula is the
-  absolute offset of copy `i`.
+  absolute offset of item `i`.
 * **Gap to previous** / **Angle step from previous**: the formula is the step
-  from copy `i-1` to copy `i`, and the positions are the running sum.
+  from item `i-1` to item `i`, and the positions are the running sum.
 
 A fret formula is naturally a *distance* (each fret is measured from the
 nut); a geometric growth is naturally a *gap*.
@@ -294,7 +305,7 @@ nut); a geometric growth is naturally a *gap*.
 * Circular angles are reduced into 0 … 360°, so copy 13 of a 30° step lands
   back on copy 1 and is reported as a duplicate.
 * A copy that lands on the original (distance 0, or a multiple of 360°) is an
-  error naming the copy; two copies on the same spot are a warning.
+  error naming its item number; two copies on the same spot are a warning.
 * Results must be finite real numbers; overflow, division by zero and
   complex results are errors.
 
@@ -306,7 +317,8 @@ nut); a geometric growth is naturally a *gap*.
 | Gaps that shrink to half over the pattern | gap | `a * (1 - t / 2)` |
 | Copies that bunch up at both ends | distance | `a * (1 - cos(pi * t)) / 2` |
 | Alternating 10 mm and 15 mm gaps | gap | `10 if i % 2 else 15` |
-| Logarithmic spacing | distance | `a * ln(1 + b * i) / ln(1 + b * n)` |
+| Logarithmic spacing | distance | `a * ln(1 + b * (i - 1)) / ln(1 + b * n)` |
+| Growing steps from the first copy | distance | `a * i^1.2` |
 
 ---
 
@@ -430,10 +442,10 @@ are resolved.
 |---|---|---|
 | `Can't read the formula …` | Syntax error, unknown name or disallowed construct. | Check spelling and parentheses; see the Formula reference. |
 | `'b' is not a valid number: …` | The `a`, `b` or `c` field holds something Fusion cannot evaluate. | Type a number or expression; `a` accepts units. |
-| `Copy i = 7: …` | The formula failed for that copy (overflow, division by zero, complex result). | Change the formula or the tunables. |
-| `Copy 3 lands on the original` | The formula gave 0 (or a multiple of 360°, or the point (0, 0) on a path) for that copy. | Use *Gap to previous*, add an offset, or change the formula. |
-| `Copy i = 3, Y formula: …` / `Rotation, copy i = 3: …` | The named formula failed for that copy. | Change that formula or the tunables. |
-| `Copy 3: size must be greater than 0` / `Copy 3 has depth 0` | The Size or Depth formula gave a value Fusion cannot build. | Change the formula; a depth may be negative but not zero. |
+| `i = 7: …` | The formula failed for that item (overflow, division by zero, complex result). | Change the formula or the tunables. |
+| `The copy at i = 3 lands on the original` | The formula gave 0 (or a multiple of 360°, or the point (0, 0) on a path) for that item. | Use *Gap to previous*, add an offset, or change the formula. |
+| `i = 3, Y formula: …` / `Rotation, i = 3: …` | The named formula failed for that item. | Change that formula or the tunables. |
+| `Size at i = 3 must be greater than 0` / `Depth is 0 at i = 3` | The Size or Depth formula gave a value Fusion cannot build. | Change the formula; a depth may be negative but not zero. |
 | `Direction 2 must not be parallel to Direction 1` | The two path directions do not span a plane. | Pick another edge or axis for Direction 2. |
 | `Path, Rotation and Size need bodies, components, sketch curves or profiles` | Faces or features cannot be rotated or scaled one by one. | Pattern the body instead, or clear the Rotation / Size fields. |
 | `Size does not apply to components` | An occurrence cannot be scaled. | Clear Size, or pattern the bodies. |

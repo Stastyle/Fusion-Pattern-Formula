@@ -427,7 +427,8 @@ class Dialog:
         flip.tooltip = 'Mirror the pattern to the other side of the original.'
 
         count = inputs.addIntegerSpinnerCommandInput(ID_COUNT, 'Copies', 1, 1000, 1, 10)
-        count.tooltip = 'How many new copies to create. The original stays where it is and is copy 0; the formula runs for i = 1 … Copies.'
+        count.tooltip = ('How many new copies to create. The original stays where it is and is item i = 1; '
+                         'the formulas run for the copies, i = 2 … Copies + 1.')
 
         group = inputs.addGroupCommandInput(ID_FORMULA_GROUP, 'Formula')
         group.isExpanded = True
@@ -441,20 +442,21 @@ class Dialog:
         for k, name in enumerate(COORDS_OPTIONS):
             dd.listItems.add(name, k == 0)
         dd.isVisible = False
-        dd.tooltip = ('Path patterns: what the two formulas give for copy i — its X and Y offset from the '
+        dd.tooltip = ('Path patterns: what the two formulas give for item i — its X and Y offset from the '
                       f'original (in {self.length_unit}), or its radius (in {self.length_unit}) and angle (degrees).')
 
         dd = g.addDropDownCommandInput(ID_MODE, 'Formula gives', adsk.core.DropDownStyles.TextListDropDownStyle)
-        dd.tooltip = ('"Distance from original": the formula is where copy i sits, measured from the original. '
-                      '"Gap to previous": the formula is the step from copy i-1 to copy i; positions add up.')
+        dd.tooltip = ('"Distance from original": the formula is where item i sits, measured from the original. '
+                      '"Gap to previous": the formula is the step from item i-1 to item i; positions add up.')
         self._fill_modes(circular=False, mode=engine.MODE_POSITION)
 
-        formula = g.addStringValueInput(ID_FORMULA, 'Formula', 'a * i')
-        formula.tooltip = 'Math in i (copy number), n (copies), t = i/n, a, b, c and any user parameter. ^ is power. See Formula reference below.'
+        formula = g.addStringValueInput(ID_FORMULA, 'Formula', 'a * (i - 1)')
+        formula.tooltip = ('Math in i (item number: the original is 1, the copies 2 …), n (copies), '
+                           't = (i-1)/n, a, b, c and any user parameter. ^ is power. See Formula reference below.')
 
         formula2 = g.addStringValueInput(ID_FORMULA2, 'Second formula', '0')
         formula2.isVisible = False
-        formula2.tooltip = 'Path patterns: the Y offset (or the angle in degrees) of copy i; same variables as the formula above.'
+        formula2.tooltip = 'Path patterns: the Y offset (or the angle in degrees) of item i; same variables as the formula above.'
 
         a_len = g.addValueInput(ID_A_LEN, 'a', self.length_unit, adsk.core.ValueInput.createByReal(1.0))
         a_len.tooltip = 'Value for a in the formula (a length). Accepts expressions and units, e.g. 25.5 in.'
@@ -565,10 +567,12 @@ class Dialog:
         formula2.isVisible = path
         if path:
             first, second = ('radius', 'angle in degrees') if polar else ('X offset', 'Y offset')
-            formula.tooltip = f'Path: the {first} of copy i. Math in i, n, t = i/n, a, b, c and any user parameter.'
-            formula2.tooltip = f'Path: the {second} of copy i; same variables as the formula above.'
+            formula.tooltip = (f'Path: the {first} of item i (the original is 1, the copies 2 …). '
+                               f'Math in i, n, t = (i-1)/n, a, b, c and any user parameter.')
+            formula2.tooltip = f'Path: the {second} of item i; same variables as the formula above.'
         else:
-            formula.tooltip = ('Math in i (copy number), n (copies), t = i/n, a, b, c and any user parameter. '
+            formula.tooltip = ('Math in i (item number: the original is 1, the copies 2 …), n (copies), t = (i-1)/n, '
+                               'a, b, c and any user parameter. '
                                '^ is power. See Formula reference below.')
         self._input(ID_A_LEN).isVisible = not circular
         self._input(ID_A_ANG).isVisible = circular
@@ -1795,6 +1799,7 @@ class Dialog:
             'size_kind': self.size_kind,
             'depth': self.depth_text,
             'operation': self.operation,
+            'numbering': 'item',          # i is the item number (original 1); see _modern_settings
         }
         if with_tokens:
             s['tokens'] = {
@@ -1812,6 +1817,7 @@ class Dialog:
         """Fill the inputs from a settings dict; unknown keys (and ``tokens``) are ignored."""
         if not s:
             return
+        s = _modern_settings(s)
 
         def do(action):
             try:
@@ -1870,6 +1876,20 @@ class Dialog:
 
 
 _FUSION_ERROR = re.compile(r'^\d+ : ')   # how Fusion's API phrases its own errors
+
+
+def _modern_settings(s: dict) -> dict:
+    """Settings written by 1.2.x numbered the copies 1 … n in their formulas; since 1.3 the
+    original is item 1 and the copies 2 … n + 1. Such formulas are rewritten with ``(i - 1)``
+    so the pattern they describe stays the same (see ``engine.renumber_from_copies``)."""
+    if not s or s.get('numbering') == 'item':
+        return s
+    s = dict(s)
+    for key in ('formula', 'formula2', 'rotation', 'size', 'depth'):
+        if s.get(key):
+            s[key] = engine.renumber_from_copies(str(s[key]))
+    s['numbering'] = 'item'
+    return s
 
 
 def _items(collection) -> list:

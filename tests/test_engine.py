@@ -1,6 +1,11 @@
 """Tests for FormulaPattern/engine.py (pure Python, no Fusion needed).
 
 Run from the repo root:  python -m unittest discover -s tests -v
+
+Numbering (since 1.3): ``i`` is the item number. The original is item 1 and is never
+changed; the copies are items 2 … n + 1, and t = (i - 1) / n. Tests that check the
+mechanics (accumulation, flip, preview layout, error wording …) write their formulas
+in terms of (i - 1), so the expected numbers are those of the copy number.
 """
 import math
 import os
@@ -14,7 +19,7 @@ import engine  # noqa: E402
 from engine import (  # noqa: E402
     Formula, FormulaError, PatternSpec, PatternResult, compute_positions,
     MODE_POSITION, MODE_SPACING, SIZE_SCALE, SIZE_DIAMETER, PRESETS, presets_for, preset_by_id,
-    format_number, preview_html, polar_to_xy,
+    format_number, preview_html, polar_to_xy, renumber_from_copies,
 )
 
 
@@ -104,7 +109,7 @@ class FormulaRejection(unittest.TestCase):
 
 
 def spec(**kw):
-    base = dict(formula='a * i', count=4, mode=MODE_POSITION, circular=False,
+    base = dict(formula='a * (i - 1)', count=4, mode=MODE_POSITION, circular=False,
                 flip=False, a=10.0, b=0.0, c=0.0, extra_vars=None)
     base.update(kw)
     return PatternSpec(**base)
@@ -112,75 +117,164 @@ def spec(**kw):
 
 class Positions(unittest.TestCase):
     def test_position_mode_uses_formula_directly(self):
-        r = compute_positions(spec(formula='a * i', count=4, a=10))
+        r = compute_positions(spec(formula='a * (i - 1)', count=4, a=10))
         self.assertEqual([round(p, 6) for p in r.positions], [10, 20, 30, 40])
         self.assertEqual([round(p, 6) for p in r.values], [10, 20, 30, 40])
 
     def test_spacing_mode_accumulates_gaps(self):
-        r = compute_positions(spec(formula='a * b^(i-1)', count=4, mode=MODE_SPACING, a=10, b=2))
+        r = compute_positions(spec(formula='a * b^(i - 2)', count=4, mode=MODE_SPACING, a=10, b=2))
         self.assertEqual([round(p, 6) for p in r.values], [10, 20, 40, 80])
         self.assertEqual([round(p, 6) for p in r.positions], [10, 30, 70, 150])
 
     def test_variables_i_n_t_are_available(self):
+        # The first copy is item 2 and sees t = 1 / n; the last copy sees t = 1.
         r = compute_positions(spec(formula='i + n + t', count=2))
-        self.assertAlmostEqual(r.positions[0], 1 + 2 + 0.5)
-        self.assertAlmostEqual(r.positions[1], 2 + 2 + 1.0)
+        self.assertAlmostEqual(r.positions[0], 2 + 2 + 0.5)
+        self.assertAlmostEqual(r.positions[1], 3 + 2 + 1.0)
 
     def test_fret_formula_matches_known_fret_positions(self):
-        # 648 mm scale, 12-TET: fret 12 is exactly half the scale.
-        r = compute_positions(spec(formula='a * (1 - 1 / 2^(i/12))', count=12, a=648))
+        # 648 mm scale, 12-TET: the original is the nut, copy k is fret k; fret 12 is half the scale.
+        r = compute_positions(spec(formula='a * (1 - 1 / 2^((i - 1) / 12))', count=12, a=648))
         self.assertAlmostEqual(r.positions[0], 648 * (1 - 2 ** (-1 / 12)), places=6)
+        self.assertAlmostEqual(r.positions[0], 36.369, places=3)
+        self.assertAlmostEqual(r.positions[11], 324.0, places=6)
+        # The shipped preset says the same thing.
+        frets = preset_by_id('frets')
+        r = compute_positions(spec(formula=frets.formula, count=12, mode=frets.mode, a=648))
         self.assertAlmostEqual(r.positions[0], 36.369, places=3)
         self.assertAlmostEqual(r.positions[11], 324.0, places=6)
 
     def test_flip_negates_positions(self):
-        r = compute_positions(spec(formula='a * i', count=2, a=5, flip=True))
+        r = compute_positions(spec(formula='a * (i - 1)', count=2, a=5, flip=True))
         self.assertEqual([round(p, 6) for p in r.positions], [-5, -10])
 
     def test_extra_vars_are_usable_as_user_parameters(self):
-        r = compute_positions(spec(formula='scale_length * i', count=1, extra_vars={'scale_length': 25.5}))
+        r = compute_positions(spec(formula='scale_length * (i - 1)', count=1, extra_vars={'scale_length': 25.5}))
         self.assertAlmostEqual(r.positions[0], 25.5)
 
     def test_builtin_variables_win_over_extra_vars(self):
         r = compute_positions(spec(formula='i', count=1, extra_vars={'i': 999}))
-        self.assertAlmostEqual(r.positions[0], 1.0)
+        self.assertAlmostEqual(r.positions[0], 2.0)
 
-    def test_copy_on_the_original_is_an_error_naming_the_copy(self):
+    def test_copy_on_the_original_is_an_error_naming_the_item(self):
+        # t = 1 at the last copy, so sin(pi * t) puts the fourth copy (item 5) on the original.
         with self.assertRaises(FormulaError) as cm:
             compute_positions(spec(formula='a * sin(pi * t)', count=4, a=10))
-        self.assertIn('4', str(cm.exception))
+        self.assertIn('i = 5', str(cm.exception))
         self.assertIn('original', str(cm.exception).lower())
 
-    def test_formula_error_names_the_copy(self):
+    def test_formula_error_names_the_item(self):
         with self.assertRaises(FormulaError) as cm:
-            compute_positions(spec(formula='1 / (i - 3)', count=4))
-        self.assertIn('i = 3', str(cm.exception))
+            compute_positions(spec(formula='1 / (i - 4)', count=4))
+        self.assertIn('i = 4', str(cm.exception))
 
     def test_duplicates_produce_a_warning_not_an_error(self):
-        r = compute_positions(spec(formula='10 if i < 3 else 10 * (i - 1)', count=3))
+        r = compute_positions(spec(formula='10 if i < 4 else 10 * (i - 2)', count=3))
         self.assertEqual([round(p, 6) for p in r.positions], [10, 10, 20])
-        self.assertTrue(any('same' in w.lower() for w in r.warnings))
+        self.assertEqual(r.warnings, ['The copies at i = 2 and i = 3 land on the same spot'])
 
     def test_count_must_be_positive(self):
         with self.assertRaises(FormulaError):
             compute_positions(spec(count=0))
 
     def test_extent_is_reported(self):
-        r = compute_positions(spec(formula='a * i', count=3, a=10))
+        r = compute_positions(spec(formula='a * (i - 1)', count=3, a=10))
         self.assertAlmostEqual(r.extent, 30.0)
+
+
+class Numbering(unittest.TestCase):
+    """i is the item number: the original is item 1, the copies are items 2 … n + 1."""
+
+    def test_first_copy_is_item_two(self):
+        r = compute_positions(spec(formula='a * i', count=3, a=10))
+        self.assertEqual([round(p, 6) for p in r.positions], [20, 30, 40])
+
+    def test_every_formula_sees_i_from_two_to_n_plus_one(self):
+        items = [2.0, 3.0, 4.0]
+        r = compute_positions(spec(formula='i', count=3))
+        self.assertEqual(r.values, items)
+        r = compute_positions(spec(formula='i', count=3, circular=True))
+        self.assertEqual(r.positions, items)
+        r = compute_positions(spec(formula='i', formula2='i', path=True, count=3,
+                                   rotation='i', size='i', depth='i'))
+        self.assertEqual((r.values, r.values2), (items, items))
+        self.assertEqual((r.rotations, r.sizes, r.depths), (items, items, items))
+
+    def test_size_formula_is_evaluated_literally(self):
+        r = compute_positions(spec(formula='a * (i - 1)', count=2, a=10, size='i^1.4'))
+        self.assertEqual(len(r.sizes), 2)
+        self.assertAlmostEqual(r.sizes[0], 2 ** 1.4)
+        self.assertAlmostEqual(r.sizes[1], 3 ** 1.4)
+
+    def test_t_runs_from_one_over_n_to_one(self):
+        r = compute_positions(spec(formula='a * t', count=4, a=40))
+        self.assertEqual([round(p, 6) for p in r.positions], [10, 20, 30, 40])
+        r = compute_positions(spec(formula='t', count=5))
+        self.assertAlmostEqual(r.positions[0], 1 / 5)
+        self.assertAlmostEqual(r.positions[-1], 1.0)
+        self.assertAlmostEqual(compute_positions(spec(formula='t', count=1)).positions[0], 1.0)
+
+    def test_n_is_the_number_of_copies(self):
+        r = compute_positions(spec(formula='n', count=3))
+        self.assertEqual(r.positions, [3.0, 3.0, 3.0])
+
+    def test_renumber_from_copies_wraps_every_bare_i(self):
+        self.assertEqual(renumber_from_copies('a * i + fib(i) * sin(i) - t'),
+                         'a * (i - 1) + fib((i - 1)) * sin((i - 1)) - t')
+        self.assertEqual(renumber_from_copies(''), '')
+        # Only the variable i, not names that merely contain an i.
+        self.assertEqual(renumber_from_copies('pi * phi + i2 + L_i + sind(i)'),
+                         'pi * phi + i2 + L_i + sind((i - 1))')
+
+    def test_renumbered_formula_keeps_its_positions(self):
+        # Up to 1.2.x 'a * i' meant [10, 20, 30] (first copy i = 1); renumbered, it still does.
+        r = compute_positions(spec(formula=renumber_from_copies('a * i'), count=3, a=10))
+        self.assertEqual([round(p, 6) for p in r.positions], [10, 20, 30])
+        old = spec(formula=renumber_from_copies('10 if i < 3 else 10 * (i - 1)'), count=3)
+        self.assertEqual([round(p, 6) for p in compute_positions(old).positions], [10, 10, 20])
+
+    def test_presets_keep_their_geometry(self):
+        def run(pid, count, **kw):
+            p = preset_by_id(pid)
+            return compute_positions(spec(formula=p.formula, formula2=p.formula2, polar=p.polar,
+                                          count=count, mode=p.mode, a=p.a_mm, b=p.b, c=p.c, **kw))
+        self.assertEqual([round(x, 6) for x in run('custom', 3).positions], [10, 20, 30])
+        self.assertEqual([round(x, 6) for x in run('geometric', 3).values], [10, 12, 14.4])
+        self.assertEqual([round(x, 6) for x in run('arithmetic', 3).values], [10, 12, 14])
+        self.assertEqual([round(x, 6) for x in run('fibonacci', 7).values], [5, 5, 10, 15, 25, 40, 65])
+        spiral = run('spiral', 12, path=True)
+        self.assertEqual([round(x, 6) for x in spiral.values2], [30 * k for k in range(1, 13)])
+        self.assertAlmostEqual(spiral.values[-1], 100.0)
+        log_spiral = run('log_spiral', 2, path=True)
+        self.assertEqual([round(x, 6) for x in log_spiral.values], [5.75, round(5 * 1.15 ** 2, 6)])
+        self.assertEqual(log_spiral.values2, [25.0, 50.0])
+        phyllo = run('phyllotaxis', 4, path=True)
+        self.assertEqual([round(x, 6) for x in phyllo.values], [5, round(5 * math.sqrt(2), 6),
+                                                                round(5 * math.sqrt(3), 6), 10])
+        self.assertEqual(phyllo.values2[0], 137.508)
+        self.assertEqual([round(x, 6) for x in run('sine', 3, path=True).values], [10, 20, 30])
+
+    def test_reference_html_describes_the_item_numbering(self):
+        ref = engine.REFERENCE_HTML
+        self.assertIn('<b>i</b> item number: the original is 1, the copies are 2 … n + 1', ref)
+        self.assertIn('<b>t</b> = (i − 1) / n, 0 at the original → 1 at the last copy', ref)
+        self.assertIn('a * i^1.2', ref)
+        self.assertIn('i^1.4', ref)
 
 
 class CircularPositions(unittest.TestCase):
     def test_angles_are_reduced_modulo_360_keeping_sign(self):
-        r = compute_positions(spec(formula='a * i', count=3, a=137.5, circular=True))
+        r = compute_positions(spec(formula='a * (i - 1)', count=3, a=137.5, circular=True))
         self.assertEqual([round(p, 6) for p in r.positions], [137.5, 275.0, 52.5])
-        r = compute_positions(spec(formula='-a * i', count=3, a=137.5, circular=True))
+        r = compute_positions(spec(formula='-a * (i - 1)', count=3, a=137.5, circular=True))
         self.assertEqual([round(p, 6) for p in r.positions], [-137.5, -275.0, -52.5])
 
     def test_multiple_of_360_is_an_error(self):
+        # The fourth copy (item 5) sits at 4 × 90° = 360°.
         with self.assertRaises(FormulaError) as cm:
-            compute_positions(spec(formula='a * i', count=4, a=90, circular=True))
-        self.assertIn('4', str(cm.exception))
+            compute_positions(spec(formula='a * (i - 1)', count=4, a=90, circular=True))
+        self.assertIn('i = 5', str(cm.exception))
+        self.assertIn('multiple of 360°', str(cm.exception))
 
     def test_spacing_mode_accumulates_angles_before_reduction(self):
         r = compute_positions(spec(formula='a', count=5, a=100, mode=MODE_SPACING, circular=True))
@@ -293,11 +387,11 @@ class Formatting(unittest.TestCase):
         self.assertEqual(format_number(0.0004), '0')
 
     def test_preview_html_lists_positions_with_units(self):
-        r = compute_positions(spec(formula='a * i', count=3, a=10))
+        r = compute_positions(spec(formula='a * (i - 1)', count=3, a=10))
         html = preview_html(r, unit='mm', circular=False, mode=MODE_POSITION)
         self.assertIn('3 copies', html)
         self.assertIn('30 mm', html)
-        self.assertIn('i = 2', html)
+        self.assertIn('i = 2: 10 mm', html)
 
     def test_preview_html_shows_gap_and_position_in_spacing_mode(self):
         r = compute_positions(spec(formula='a', count=3, a=10, mode=MODE_SPACING))
@@ -306,20 +400,21 @@ class Formatting(unittest.TestCase):
         self.assertIn('30 mm', html)
 
     def test_preview_html_elides_long_lists_but_keeps_last(self):
-        r = compute_positions(spec(formula='a * i', count=40, a=1))
+        # 40 copies are items 2 … 41.
+        r = compute_positions(spec(formula='a * (i - 1)', count=40, a=1))
         html = preview_html(r, unit='mm', circular=False, mode=MODE_POSITION)
-        self.assertIn('i = 40', html)
+        self.assertIn('i = 41: 40 mm', html)
         self.assertNotIn('i = 20:', html)
         self.assertIn('…', html)
 
     def test_preview_html_uses_degrees_for_circular(self):
-        r = compute_positions(spec(formula='a * i', count=2, a=30, circular=True))
+        r = compute_positions(spec(formula='a * (i - 1)', count=2, a=30, circular=True))
         html = preview_html(r, unit='mm', circular=True, mode=MODE_POSITION)
         self.assertIn('60°', html)
         self.assertNotIn('mm', html)
 
     def test_preview_html_includes_warnings(self):
-        r = compute_positions(spec(formula='10 if i < 3 else 10 * (i - 1)', count=3))
+        r = compute_positions(spec(formula='10 if i < 4 else 10 * (i - 2)', count=3))
         html = preview_html(r, unit='mm', circular=False, mode=MODE_POSITION)
         self.assertIn('same', html.lower())
 
@@ -331,74 +426,76 @@ class Formatting(unittest.TestCase):
         ref = engine.REFERENCE_HTML
         self.assertIn('<b>Vary each copy</b>', ref)
         self.assertIn('<b>Path</b> ', ref)
-        for example in ('b * i', '1 + 0.1 * i', 'a + 0.1 * i', 'a * ((i * i) % 7) / 7'):
+        for example in ('b * (i - 1)', 'i^1.4', '1.2^(i - 1)', 'a + 0.1 * (i - 1)',
+                        'a * (((i - 1) * (i - 1)) % 7) / 7'):
             self.assertIn(example, ref)
         self.assertIn('degrees', ref)
 
 
-LINEAR_PREVIEW = '<b>3 copies</b> · farthest copy 30 mm<br>i = 1: 10 mm<br>i = 2: 20 mm<br>i = 3: 30 mm'
+LINEAR_PREVIEW = '<b>3 copies</b> · farthest copy 30 mm<br>i = 2: 10 mm<br>i = 3: 20 mm<br>i = 4: 30 mm'
 
 
 class PreviewOfPathAndVary(unittest.TestCase):
     def test_linear_preview_is_unchanged_when_nothing_varies(self):
-        r = compute_positions(spec(formula='a * i', count=3, a=10, rotation='', size='', depth=''))
+        r = compute_positions(spec(formula='a * (i - 1)', count=3, a=10, rotation='', size='', depth=''))
         self.assertEqual(preview_html(r, unit='mm', circular=False, mode=MODE_POSITION), LINEAR_PREVIEW)
         # A result built the old way (without the new fields) previews the same.
         old = PatternResult(values=r.values, positions=r.positions, extent=r.extent)
         self.assertEqual(preview_html(old, 'mm', False, MODE_POSITION, False, 12), LINEAR_PREVIEW)
 
     def test_path_lines_show_points_and_the_farthest_copy(self):
-        r = compute_positions(spec(formula='a * i', formula2='b * i', path=True, count=2, a=3, b=4))
+        r = compute_positions(spec(formula='a * (i - 1)', formula2='b * (i - 1)', path=True, count=2, a=3, b=4))
         html = preview_html(r, unit='mm', circular=False, mode=MODE_POSITION, path=True)
-        self.assertEqual(html, '<b>2 copies</b> · farthest copy 10 mm<br>i = 1: (3, 4) mm<br>i = 2: (6, 8) mm')
+        self.assertEqual(html, '<b>2 copies</b> · farthest copy 10 mm<br>i = 2: (3, 4) mm<br>i = 3: (6, 8) mm')
 
     def test_path_preview_ignores_mode_and_circular(self):
-        r = compute_positions(spec(formula='a * i', formula2='b * i', path=True, count=1, a=3, b=4))
+        r = compute_positions(spec(formula='a * (i - 1)', formula2='b * (i - 1)', path=True, count=1, a=3, b=4))
         html = preview_html(r, unit='in', circular=True, mode=MODE_SPACING, path=True)
-        self.assertEqual(html, '<b>1 copy</b> · farthest copy 5 in<br>i = 1: (3, 4) in')
+        self.assertEqual(html, '<b>1 copy</b> · farthest copy 5 in<br>i = 2: (3, 4) in')
 
     def test_path_preview_still_elides_and_warns(self):
-        r = compute_positions(spec(formula='10', formula2='10 if i < 3 else 10 * i', path=True, count=40))
+        r = compute_positions(spec(formula='10', formula2='10 if i < 4 else 10 * (i - 1)', path=True, count=40))
         html = preview_html(r, unit='mm', circular=False, mode=MODE_POSITION, path=True)
-        self.assertIn('i = 40: (10, 400) mm', html)
+        self.assertIn('i = 41: (10, 400) mm', html)
         self.assertNotIn('i = 20:', html)
         self.assertIn('…', html)
-        self.assertIn('<i>⚠ Copies 1 and 2 land on the same spot</i>', html)
+        self.assertIn('<i>⚠ The copies at i = 2 and i = 3 land on the same spot</i>', html)
 
     def test_vary_suffixes_follow_each_line_in_order(self):
-        r = compute_positions(spec(formula='a * i', count=2, a=10, rotation='30 * i', size='1 + 0.1 * i', depth='a'))
+        r = compute_positions(spec(formula='a * (i - 1)', count=2, a=10,
+                                   rotation='30 * (i - 1)', size='1 + 0.1 * (i - 1)', depth='a'))
         html = preview_html(r, unit='mm', circular=False, mode=MODE_POSITION)
         self.assertEqual(html, '<b>2 copies</b> · farthest copy 20 mm<br>'
-                               'i = 1: 10 mm · turn 30° · ×1.1 · depth 10 mm<br>'
-                               'i = 2: 20 mm · turn 60° · ×1.2 · depth 10 mm')
+                               'i = 2: 10 mm · turn 30° · ×1.1 · depth 10 mm<br>'
+                               'i = 3: 20 mm · turn 60° · ×1.2 · depth 10 mm')
 
     def test_diameter_size_shows_the_unit(self):
-        r = compute_positions(spec(formula='a * i', count=1, a=10, size='8'))
+        r = compute_positions(spec(formula='a * (i - 1)', count=1, a=10, size='8'))
         html = preview_html(r, unit='mm', circular=False, mode=MODE_POSITION, size_kind=SIZE_DIAMETER)
-        self.assertTrue(html.endswith('i = 1: 10 mm · ⌀8 mm'), html)
+        self.assertTrue(html.endswith('i = 2: 10 mm · ⌀8 mm'), html)
         html = preview_html(r, unit='mm', circular=False, mode=MODE_POSITION, size_kind=SIZE_SCALE)
-        self.assertTrue(html.endswith('i = 1: 10 mm · ×8'), html)
+        self.assertTrue(html.endswith('i = 2: 10 mm · ×8'), html)
 
     def test_each_vary_field_appears_on_its_own(self):
-        r = compute_positions(spec(formula='a * i', count=1, a=10, rotation='45'))
-        self.assertTrue(preview_html(r, 'mm', False, MODE_POSITION).endswith('i = 1: 10 mm · turn 45°'))
-        r = compute_positions(spec(formula='a * i', count=1, a=10, depth='-2.5'))
-        self.assertTrue(preview_html(r, 'mm', False, MODE_POSITION).endswith('i = 1: 10 mm · depth -2.5 mm'))
+        r = compute_positions(spec(formula='a * (i - 1)', count=1, a=10, rotation='45'))
+        self.assertTrue(preview_html(r, 'mm', False, MODE_POSITION).endswith('i = 2: 10 mm · turn 45°'))
+        r = compute_positions(spec(formula='a * (i - 1)', count=1, a=10, depth='-2.5'))
+        self.assertTrue(preview_html(r, 'mm', False, MODE_POSITION).endswith('i = 2: 10 mm · depth -2.5 mm'))
 
     def test_vary_suffix_comes_after_the_spacing_gap(self):
-        r = compute_positions(spec(formula='a', count=2, a=10, mode=MODE_SPACING, rotation='b * i', b=5))
+        r = compute_positions(spec(formula='a', count=2, a=10, mode=MODE_SPACING, rotation='b * (i - 1)', b=5))
         html = preview_html(r, unit='mm', circular=False, mode=MODE_SPACING)
-        self.assertIn('i = 2: 20 mm (+10) · turn 10°', html)
+        self.assertIn('i = 3: 20 mm (+10) · turn 10°', html)
 
     def test_circular_preview_keeps_degrees_but_depth_uses_the_length_unit(self):
-        r = compute_positions(spec(formula='a * i', count=1, a=30, circular=True, depth='8'))
+        r = compute_positions(spec(formula='a * (i - 1)', count=1, a=30, circular=True, depth='8'))
         html = preview_html(r, unit='mm', circular=True, mode=MODE_POSITION)
-        self.assertEqual(html, '<b>1 copy</b> · largest angle 30°<br>i = 1: 30° · depth 8 mm')
+        self.assertEqual(html, '<b>1 copy</b> · largest angle 30°<br>i = 2: 30° · depth 8 mm')
 
     def test_path_lines_take_vary_suffixes_too(self):
-        r = compute_positions(spec(formula='a * i', formula2='0', path=True, count=1, a=10, rotation='90'))
+        r = compute_positions(spec(formula='a * (i - 1)', formula2='0', path=True, count=1, a=10, rotation='90'))
         html = preview_html(r, unit='mm', circular=False, mode=MODE_POSITION, path=True)
-        self.assertTrue(html.endswith('i = 1: (10, 0) mm · turn 90°'), html)
+        self.assertTrue(html.endswith('i = 2: (10, 0) mm · turn 90°'), html)
 
 
 class PathPositions(unittest.TestCase):
@@ -420,7 +517,7 @@ class PathPositions(unittest.TestCase):
         self.assertEqual(polar_to_xy(3, 0), (3.0, 0.0))
 
     def test_cartesian_points_distances_and_raw_values(self):
-        r = compute_positions(spec(formula='a * i', formula2='b * i', path=True, count=2, a=3, b=4))
+        r = compute_positions(spec(formula='a * (i - 1)', formula2='b * (i - 1)', path=True, count=2, a=3, b=4))
         self.assertEqual([(round(x, 6), round(y, 6)) for x, y in r.points], [(3, 4), (6, 8)])
         self.assertEqual([round(p, 6) for p in r.positions], [5, 10])
         self.assertAlmostEqual(r.extent, 10.0)
@@ -430,7 +527,7 @@ class PathPositions(unittest.TestCase):
         self.assertEqual(r.warnings, [])
 
     def test_polar_points_use_degrees(self):
-        r = compute_positions(spec(formula='a', formula2='90 * i', path=True, polar=True, count=3, a=10))
+        r = compute_positions(spec(formula='a', formula2='90 * (i - 1)', path=True, polar=True, count=3, a=10))
         expected = [(0, 10), (-10, 0), (0, -10)]
         for (x, y), (ex, ey) in zip(r.points, expected):
             self.assertAlmostEqual(x, ex)
@@ -440,62 +537,64 @@ class PathPositions(unittest.TestCase):
         self.assertEqual(r.values2, [90.0, 180.0, 270.0])
 
     def test_flip_negates_y_only(self):
-        r = compute_positions(spec(formula='a * i', formula2='b * i', path=True, count=2, a=3, b=4, flip=True))
+        r = compute_positions(spec(formula='a * (i - 1)', formula2='b * (i - 1)', path=True, count=2, a=3, b=4,
+                                   flip=True))
         self.assertEqual([(round(x, 6), round(y, 6)) for x, y in r.points], [(3, -4), (6, -8)])
         r = compute_positions(spec(formula='a', formula2='90', path=True, polar=True, count=1, a=10, flip=True))
         self.assertAlmostEqual(r.points[0][0], 0.0)
         self.assertAlmostEqual(r.points[0][1], -10.0)
 
     def test_mode_and_circular_are_ignored_for_a_path(self):
-        base = spec(formula='a * i', formula2='b * i', path=True, count=3, a=3, b=4)
-        spacing = spec(formula='a * i', formula2='b * i', path=True, count=3, a=3, b=4,
+        base = spec(formula='a * (i - 1)', formula2='b * (i - 1)', path=True, count=3, a=3, b=4)
+        spacing = spec(formula='a * (i - 1)', formula2='b * (i - 1)', path=True, count=3, a=3, b=4,
                        mode=MODE_SPACING, circular=True)
         self.assertEqual(compute_positions(spacing).points, compute_positions(base).points)
         self.assertEqual(compute_positions(spacing).positions, compute_positions(base).positions)
 
     def test_environment_has_i_n_t_and_user_parameters(self):
+        # Items 2 and 3 of n = 2 copies: t = 0.5 then 1.
         r = compute_positions(spec(formula='i + n', formula2='t + L', path=True, count=2, extra_vars={'L': 100}))
-        self.assertEqual(r.points, [(3.0, 100.5), (4.0, 101.0)])
+        self.assertEqual(r.points, [(4.0, 100.5), (5.0, 101.0)])
 
-    def test_point_on_the_original_is_an_error_naming_the_copy(self):
+    def test_point_on_the_original_is_an_error_naming_the_item(self):
         with self.assertRaises(FormulaError) as cm:
-            compute_positions(spec(formula='a * (i - 1)', formula2='0', path=True, count=3, a=10))
-        self.assertEqual(str(cm.exception), 'Copy 1 lands on the original (its offset is 0). '
+            compute_positions(spec(formula='a * (i - 2)', formula2='0', path=True, count=3, a=10))
+        self.assertEqual(str(cm.exception), 'The copy at i = 2 lands on the original (its offset is 0). '
                                             'Change the formula so every copy moves away from it')
         with self.assertRaises(FormulaError) as cm:
             compute_positions(spec(formula='1e-8', formula2='1e-8', path=True, count=1))
-        self.assertIn('Copy 1 lands on the original', str(cm.exception))
+        self.assertIn('The copy at i = 2 lands on the original', str(cm.exception))
 
     def test_duplicate_points_warn_but_equal_distances_do_not(self):
-        r = compute_positions(spec(formula='10', formula2='10 if i < 3 else 20', path=True, count=3))
-        self.assertEqual(r.warnings, ['Copies 1 and 2 land on the same spot'])
+        r = compute_positions(spec(formula='10', formula2='10 if i < 4 else 20', path=True, count=3))
+        self.assertEqual(r.warnings, ['The copies at i = 2 and i = 3 land on the same spot'])
         # (3, 4) and (4, 3) are both 5 away from the original but are different points.
-        r = compute_positions(spec(formula='3 if i == 1 else 4', formula2='4 if i == 1 else 3', path=True, count=2))
+        r = compute_positions(spec(formula='3 if i == 2 else 4', formula2='4 if i == 2 else 3', path=True, count=2))
         self.assertEqual([round(p, 6) for p in r.positions], [5, 5])
         self.assertEqual(r.warnings, [])
         # Same x, different y is not a duplicate either.
-        r = compute_positions(spec(formula='a', formula2='b * i', path=True, count=4, a=10, b=5))
+        r = compute_positions(spec(formula='a', formula2='b * (i - 1)', path=True, count=4, a=10, b=5))
         self.assertEqual(r.warnings, [])
 
     def test_many_duplicate_points_are_summarised(self):
         r = compute_positions(spec(formula='10', formula2='10', path=True, count=6))
         self.assertEqual(len(r.warnings), 4)
-        self.assertEqual(r.warnings[0], 'Copies 1 and 2 land on the same spot')
+        self.assertEqual(r.warnings[0], 'The copies at i = 2 and i = 3 land on the same spot')
         self.assertTrue(r.warnings[-1].startswith('… and '), r.warnings[-1])
 
-    def test_formula_errors_say_which_formula_and_copy(self):
+    def test_formula_errors_say_which_formula_and_item(self):
         with self.assertRaises(FormulaError) as cm:
-            compute_positions(spec(formula='1 / (i - 3)', formula2='1', path=True, count=4))
-        self.assertEqual(str(cm.exception), 'Copy i = 3, X formula: Division by zero')
+            compute_positions(spec(formula='1 / (i - 4)', formula2='1', path=True, count=4))
+        self.assertEqual(str(cm.exception), 'i = 4, X formula: Division by zero')
         with self.assertRaises(FormulaError) as cm:
-            compute_positions(spec(formula='1', formula2='1 / (i - 3)', path=True, count=4))
-        self.assertEqual(str(cm.exception), 'Copy i = 3, Y formula: Division by zero')
+            compute_positions(spec(formula='1', formula2='1 / (i - 4)', path=True, count=4))
+        self.assertEqual(str(cm.exception), 'i = 4, Y formula: Division by zero')
         with self.assertRaises(FormulaError) as cm:
-            compute_positions(spec(formula='1 / (i - 3)', formula2='1', path=True, polar=True, count=4))
-        self.assertEqual(str(cm.exception), 'Copy i = 3, radius formula: Division by zero')
+            compute_positions(spec(formula='1 / (i - 4)', formula2='1', path=True, polar=True, count=4))
+        self.assertEqual(str(cm.exception), 'i = 4, radius formula: Division by zero')
         with self.assertRaises(FormulaError) as cm:
-            compute_positions(spec(formula='1', formula2='1 / (i - 3)', path=True, polar=True, count=4))
-        self.assertEqual(str(cm.exception), 'Copy i = 3, angle formula: Division by zero')
+            compute_positions(spec(formula='1', formula2='1 / (i - 4)', path=True, polar=True, count=4))
+        self.assertEqual(str(cm.exception), 'i = 4, angle formula: Division by zero')
 
     def test_unreadable_second_formula_names_itself(self):
         with self.assertRaises(FormulaError) as cm:
@@ -507,10 +606,10 @@ class PathPositions(unittest.TestCase):
 
     def test_empty_second_formula(self):
         with self.assertRaises(FormulaError) as cm:
-            compute_positions(spec(formula='a * i', formula2='  ', path=True, count=2))
+            compute_positions(spec(formula='a * (i - 1)', formula2='  ', path=True, count=2))
         self.assertEqual(str(cm.exception), 'The Y formula is empty')
         with self.assertRaises(FormulaError) as cm:
-            compute_positions(spec(formula='a * i', formula2='', path=True, polar=True, count=2))
+            compute_positions(spec(formula='a * (i - 1)', formula2='', path=True, polar=True, count=2))
         self.assertEqual(str(cm.exception), 'The angle formula is empty')
         with self.assertRaises(FormulaError) as cm:
             compute_positions(spec(formula='', formula2='1', path=True, count=2))
@@ -518,21 +617,26 @@ class PathPositions(unittest.TestCase):
 
     def test_linear_and_circular_error_wording_is_unchanged(self):
         with self.assertRaises(FormulaError) as cm:
-            compute_positions(spec(formula='1 / (i - 3)', count=4))
-        self.assertEqual(str(cm.exception), 'Copy i = 3: Division by zero')
+            compute_positions(spec(formula='1 / (i - 4)', count=4))
+        self.assertEqual(str(cm.exception), 'i = 4: Division by zero')
         with self.assertRaises(FormulaError) as cm:
-            compute_positions(spec(formula='1 / (i - 3)', count=4, circular=True))
-        self.assertEqual(str(cm.exception), 'Copy i = 3: Division by zero')
+            compute_positions(spec(formula='1 / (i - 4)', count=4, circular=True))
+        self.assertEqual(str(cm.exception), 'i = 4: Division by zero')
         with self.assertRaises(FormulaError) as cm:
             compute_positions(spec(formula='', count=4))
         self.assertEqual(str(cm.exception), 'The formula is empty')
         with self.assertRaises(FormulaError) as cm:
-            compute_positions(spec(formula='a * (i - 1)', count=2))
-        self.assertEqual(str(cm.exception), 'Copy 1 lands on the original (its distance is 0). '
+            compute_positions(spec(formula='a * (i - 2)', count=2))
+        self.assertEqual(str(cm.exception), 'The copy at i = 2 lands on the original (its distance is 0). '
+                                            'Change the formula so every copy moves away from it')
+        with self.assertRaises(FormulaError) as cm:
+            compute_positions(spec(formula='a * (i - 1)', count=2, a=180, circular=True))
+        self.assertEqual(str(cm.exception), 'The copy at i = 3 lands on the original '
+                                            '(its angle is a multiple of 360°). '
                                             'Change the formula so every copy moves away from it')
 
     def test_second_formula_is_ignored_unless_path(self):
-        r = compute_positions(spec(formula='a * i', formula2='1 / 0', count=2, a=10))
+        r = compute_positions(spec(formula='a * (i - 1)', formula2='1 / 0', count=2, a=10))
         self.assertEqual([round(p, 6) for p in r.positions], [10, 20])
         self.assertEqual(r.points, [])
         self.assertEqual(r.values2, [])
@@ -541,76 +645,80 @@ class PathPositions(unittest.TestCase):
 class VaryEachCopy(unittest.TestCase):
     def test_lists_are_empty_when_the_fields_are_blank(self):
         for kw in (dict(), dict(path=True, formula2='0'), dict(circular=True)):
-            r = compute_positions(spec(formula='a * i', count=3, a=10, rotation='', size='  ', depth='', **kw))
+            r = compute_positions(spec(formula='a * (i - 1)', count=3, a=10, rotation='', size='  ', depth='', **kw))
             self.assertEqual((r.rotations, r.sizes, r.depths), ([], [], []), kw)
 
     def test_rotation_size_and_depth_are_evaluated_per_copy(self):
-        r = compute_positions(spec(formula='a * i', count=3, a=70, b=30,
-                                   rotation='b * i', size='1 + 0.1 * i', depth='a * ((i * i) % 7) / 7'))
+        r = compute_positions(spec(formula='a * (i - 1)', count=3, a=70, b=30,
+                                   rotation='b * (i - 1)', size='1 + 0.1 * (i - 1)',
+                                   depth='a * (((i - 1) * (i - 1)) % 7) / 7'))
         self.assertEqual([round(x, 6) for x in r.rotations], [30, 60, 90])
         self.assertEqual([round(x, 6) for x in r.sizes], [1.1, 1.2, 1.3])
         self.assertEqual([round(x, 6) for x in r.depths], [10, 40, 20])
         self.assertEqual(len(r.positions), 3)
 
     def test_qrd_depth_example_over_six_wells(self):
-        r = compute_positions(spec(formula='a * i', count=6, a=70, depth='a * ((i * i) % 7) / 7'))
+        # The reference's QRD example: the original is well 0, the copies wells 1 … 6.
+        r = compute_positions(spec(formula='a * (i - 1)', count=6, a=70, depth='a * (((i - 1) * (i - 1)) % 7) / 7'))
         self.assertEqual([round(d, 6) for d in r.depths], [10, 40, 20, 20, 40, 10])
 
     def test_vary_fields_apply_to_circular_and_path_patterns(self):
-        r = compute_positions(spec(formula='a * i', count=2, a=30, circular=True, rotation='10 * i', size='2', depth='3'))
+        r = compute_positions(spec(formula='a * (i - 1)', count=2, a=30, circular=True,
+                                   rotation='10 * (i - 1)', size='2', depth='3'))
         self.assertEqual((r.rotations, r.sizes, r.depths), ([10.0, 20.0], [2.0, 2.0], [3.0, 3.0]))
-        r = compute_positions(spec(formula='a * i', formula2='0', path=True, count=2, a=10, rotation='t * 90'))
+        r = compute_positions(spec(formula='a * (i - 1)', formula2='0', path=True, count=2, a=10, rotation='t * 90'))
         self.assertEqual(r.rotations, [45.0, 90.0])
 
     def test_vary_fields_see_the_same_environment(self):
-        r = compute_positions(spec(formula='a * i', count=2, a=10, b=2, c=3,
+        # Items 2 and 3 of n = 2 copies, t = 0.5 then 1.
+        r = compute_positions(spec(formula='a * (i - 1)', count=2, a=10, b=2, c=3,
                                    rotation='n + i', size='b + c * t', depth='L', extra_vars={'L': 7}))
-        self.assertEqual(r.rotations, [3.0, 4.0])
+        self.assertEqual(r.rotations, [4.0, 5.0])
         self.assertEqual(r.sizes, [3.5, 5.0])
         self.assertEqual(r.depths, [7.0, 7.0])
 
     def test_rotation_has_no_restriction(self):
-        r = compute_positions(spec(formula='a * i', count=3, a=10, rotation='(i - 2) * 400'))
+        r = compute_positions(spec(formula='a * (i - 1)', count=3, a=10, rotation='(i - 3) * 400'))
         self.assertEqual(r.rotations, [-400.0, 0.0, 400.0])
 
     def test_size_must_be_greater_than_zero(self):
         with self.assertRaises(FormulaError) as cm:
-            compute_positions(spec(formula='a * i', count=3, a=10, size='abs(i - 2)'))
-        self.assertEqual(str(cm.exception), 'Copy 2: size must be greater than 0')
+            compute_positions(spec(formula='a * (i - 1)', count=3, a=10, size='abs(i - 3)'))
+        self.assertEqual(str(cm.exception), 'Size at i = 3 must be greater than 0')
         with self.assertRaises(FormulaError) as cm:
-            compute_positions(spec(formula='a * i', count=3, a=10, size='-1'))
-        self.assertEqual(str(cm.exception), 'Copy 1: size must be greater than 0')
-        r = compute_positions(spec(formula='a * i', count=1, a=10, size='0.001'))
+            compute_positions(spec(formula='a * (i - 1)', count=3, a=10, size='-1'))
+        self.assertEqual(str(cm.exception), 'Size at i = 2 must be greater than 0')
+        r = compute_positions(spec(formula='a * (i - 1)', count=1, a=10, size='0.001'))
         self.assertEqual(r.sizes, [0.001])
 
     def test_depth_must_not_be_zero_but_may_be_negative(self):
         with self.assertRaises(FormulaError) as cm:
-            compute_positions(spec(formula='a * i', count=3, a=10, depth='i - 2'))
-        self.assertEqual(str(cm.exception), 'Copy 2 has depth 0')
+            compute_positions(spec(formula='a * (i - 1)', count=3, a=10, depth='i - 3'))
+        self.assertEqual(str(cm.exception), 'Depth is 0 at i = 3')
         with self.assertRaises(FormulaError) as cm:
-            compute_positions(spec(formula='a * i', count=1, a=10, depth='1e-9'))
-        self.assertEqual(str(cm.exception), 'Copy 1 has depth 0')
-        r = compute_positions(spec(formula='a * i', count=2, a=10, depth='-a'))
+            compute_positions(spec(formula='a * (i - 1)', count=1, a=10, depth='1e-9'))
+        self.assertEqual(str(cm.exception), 'Depth is 0 at i = 2')
+        r = compute_positions(spec(formula='a * (i - 1)', count=2, a=10, depth='-a'))
         self.assertEqual(r.depths, [-10.0, -10.0])
 
-    def test_vary_errors_name_the_field_and_the_copy(self):
+    def test_vary_errors_name_the_field_and_the_item(self):
         with self.assertRaises(FormulaError) as cm:
-            compute_positions(spec(formula='a * i', count=4, a=10, rotation='1 / (i - 3)'))
-        self.assertEqual(str(cm.exception), 'Rotation, copy i = 3: Division by zero')
+            compute_positions(spec(formula='a * (i - 1)', count=4, a=10, rotation='1 / (i - 4)'))
+        self.assertEqual(str(cm.exception), 'Rotation, i = 4: Division by zero')
         with self.assertRaises(FormulaError) as cm:
-            compute_positions(spec(formula='a * i', count=4, a=10, size='1 / (i - 3)'))
-        self.assertEqual(str(cm.exception), 'Size, copy i = 3: Division by zero')
+            compute_positions(spec(formula='a * (i - 1)', count=4, a=10, size='1 / (i - 4)'))
+        self.assertEqual(str(cm.exception), 'Size, i = 4: Division by zero')
         with self.assertRaises(FormulaError) as cm:
-            compute_positions(spec(formula='a * i', count=4, a=10, depth='1 / (i - 3)'))
-        self.assertEqual(str(cm.exception), 'Depth, copy i = 3: Division by zero')
+            compute_positions(spec(formula='a * (i - 1)', count=4, a=10, depth='1 / (i - 4)'))
+        self.assertEqual(str(cm.exception), 'Depth, i = 4: Division by zero')
         with self.assertRaises(FormulaError) as cm:
-            compute_positions(spec(formula='a * i', count=4, a=10, rotation='b *'))
+            compute_positions(spec(formula='a * (i - 1)', count=4, a=10, rotation='b *'))
         self.assertTrue(str(cm.exception).startswith("Rotation: Can't read the formula"), str(cm.exception))
 
     def test_position_errors_come_before_vary_errors(self):
         with self.assertRaises(FormulaError) as cm:
-            compute_positions(spec(formula='1 / (i - 2)', count=3, rotation='1 / 0'))
-        self.assertEqual(str(cm.exception), 'Copy i = 2: Division by zero')
+            compute_positions(spec(formula='1 / (i - 3)', count=3, rotation='1 / 0'))
+        self.assertEqual(str(cm.exception), 'i = 3: Division by zero')
 
 
 if __name__ == '__main__':

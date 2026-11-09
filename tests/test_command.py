@@ -267,13 +267,13 @@ class PresetsAndFormula(FusionHarness):
     def test_fret_preset_fills_formula_and_scale_length(self):
         cmd, dialog = self.open_dialog()
         self.choose(cmd, C.ID_PRESET, 'Guitar frets (12-TET)')
-        self.assertEqual(dialog.formula_text, 'a * (1 - 1 / 2^(i / 12))')
+        self.assertEqual(dialog.formula_text, 'a * (1 - 1 / 2^((i - 1) / 12))')
         self.assertAlmostEqual(dialog.a, 648.0)
         self.assertEqual(dialog.mode, C.engine.MODE_POSITION)
         self.assertIn('scale length', cmd.commandInputs.itemById(C.ID_NOTES).text)
         cmd.commandInputs.itemById(C.ID_COUNT).value = 12
         self.changed(cmd, C.ID_COUNT)
-        self.assertIn('i = 12: 324 mm', self.preview_text(cmd))
+        self.assertIn('i = 13: 324 mm', self.preview_text(cmd))   # item 13 is fret 12
 
     def test_a_accepts_units_in_the_expression(self):
         cmd, dialog = self.open_dialog()
@@ -284,7 +284,7 @@ class PresetsAndFormula(FusionHarness):
         cmd, dialog = self.open_dialog()
         self.choose(cmd, C.ID_PRESET, 'Fibonacci gaps')
         self.assertEqual(dialog.preset_id, 'fibonacci')
-        self.set_text(cmd, C.ID_FORMULA, 'a * fib(i) + 1')
+        self.set_text(cmd, C.ID_FORMULA, 'a * fib(i - 1) + 1')
         self.assertEqual(dialog.preset_id, 'custom')
         self.assertIn('Write any formula', cmd.commandInputs.itemById(C.ID_NOTES).text)
 
@@ -302,7 +302,7 @@ class PresetsAndFormula(FusionHarness):
         self.assertIn("Can't read the formula", self.preview_text(cmd))
         self.assertTrue(cmd.commandInputs.itemById(C.ID_FORMULA).isValueError)
         self.assertFalse(self.validate(cmd))
-        self.set_text(cmd, C.ID_FORMULA, 'a * i')
+        self.set_text(cmd, C.ID_FORMULA, 'a * (i - 1)')
         self.assertFalse(cmd.commandInputs.itemById(C.ID_FORMULA).isValueError)
         self.assertTrue(self.validate(cmd))
 
@@ -322,8 +322,8 @@ class PresetsAndFormula(FusionHarness):
         self.assertAlmostEqual(values['twist'], 90.0)
         self.assertAlmostEqual(values['ratio'], 1.5)
         cmd.commandInputs.itemById(C.ID_COUNT).value = 12
-        self.set_text(cmd, C.ID_FORMULA, 'scale * (1 - 1 / 2^(i/12))')
-        self.assertIn('i = 12: 324 mm', self.preview_text(cmd))
+        self.set_text(cmd, C.ID_FORMULA, 'scale * (1 - 1 / 2^((i - 1)/12))')
+        self.assertIn('i = 13: 324 mm', self.preview_text(cmd))   # item 13 is fret 12
 
 
 class LengthUnits(FusionHarness):
@@ -538,14 +538,15 @@ class Settings(FusionHarness):
         cmd.destroy.fire(adsk.core.CommandEventArgs(cmd, adsk.core.CommandTerminationReason.CompletedTerminationReason))
         self.assertEqual(len(self.saved), 1)
         self.assertEqual(self.saved[0]['preset'], 'geometric')
-        self.assertEqual(self.saved[0]['formula'], 'a * b^(i - 1)')
+        self.assertEqual(self.saved[0]['formula'], 'a * b^(i - 2)')
         self.assertEqual(self.saved[0]['b'], '1.2')
+        self.assertEqual(self.saved[0]['numbering'], 'item', 'the file says which numbering its formulas use')
 
     def test_settings_are_restored_next_time_without_reapplying_the_preset(self):
         stored = {
             'pattern_type': 'circular', 'object_type': 'Features', 'count': 7, 'preset': 'geometric',
-            'mode': 'spacing', 'formula': 'a * b^(i - 1) + c', 'a_angle': '12 deg', 'b': '1.1', 'c': '0.5',
-            'flip': True, 'live': False, 'compute': 2, 'group_name': 'Fins',
+            'mode': 'spacing', 'formula': 'a * b^(i - 2) + c', 'a_angle': '12 deg', 'b': '1.1', 'c': '0.5',
+            'flip': True, 'live': False, 'compute': 2, 'group_name': 'Fins', 'numbering': 'item',
         }
         with mock.patch.object(command, 'load_settings', return_value=stored):
             cmd, dialog = self.open_dialog()
@@ -554,7 +555,7 @@ class Settings(FusionHarness):
         self.assertEqual(dialog.count, 7)
         self.assertEqual(dialog.preset_id, 'geometric')
         self.assertEqual(dialog.mode, 'spacing')
-        self.assertEqual(dialog.formula_text, 'a * b^(i - 1) + c')
+        self.assertEqual(dialog.formula_text, 'a * b^(i - 2) + c')
         self.assertAlmostEqual(dialog.a, 12.0)
         self.assertAlmostEqual(dialog.b, 1.1)
         self.assertAlmostEqual(dialog.c, 0.5)
@@ -563,6 +564,30 @@ class Settings(FusionHarness):
         self.assertEqual(dialog.compute_option, adsk.fusion.PatternComputeOptions.AdjustPatternCompute)
         self.assertEqual(dialog.group_name, 'Fins')
         self.assertEqual(cmd.commandInputs.itemById(C.ID_OBJECTS).selectionFilters, ['Features'])
+
+    def test_remembered_values_from_1_2_are_renumbered_so_the_pattern_stays_the_same(self):
+        # 1.2.x numbered the copies 1 … n in the formulas and wrote no 'numbering' key; since
+        # 1.3 the original is item 1, so every bare i comes back as (i - 1): same geometry.
+        stored = {
+            'pattern_type': 'linear', 'object_type': 'Bodies', 'count': 4, 'preset': 'custom',
+            'mode': 'position', 'formula': 'a * i', 'rotation': '30 * i', 'size': '1 + 0.1 * i',
+            'depth': 'a * ((i * i) % 7) / 7',
+        }
+        with mock.patch.object(command, 'load_settings', return_value=stored):
+            cmd, dialog = self.open_dialog()
+        self.assertEqual(dialog.formula_text, 'a * (i - 1)')
+        self.assertEqual(dialog.rotation_text, '30 * (i - 1)')
+        self.assertEqual(dialog.size_text, '1 + 0.1 * (i - 1)')
+        self.assertEqual(dialog.depth_text, 'a * (((i - 1) * (i - 1)) % 7) / 7')
+        self.assertEqual(dialog.preset_id, 'custom')
+        text = self.preview_text(cmd)
+        self.assertIn('i = 2: 10 mm · turn 30° · ×1.1', text, 'the first copy sits where 1.2 put it')
+        self.assertIn('i = 5: 40 mm · turn 120° · ×1.4', text)
+        self.assertNotIn('i = 1:', text)
+        cmd.destroy.fire(adsk.core.CommandEventArgs(cmd, adsk.core.CommandTerminationReason.CompletedTerminationReason))
+        self.assertEqual(self.saved[0]['formula'], 'a * (i - 1)')
+        self.assertEqual(self.saved[0]['rotation'], '30 * (i - 1)')
+        self.assertEqual(self.saved[0]['numbering'], 'item', 'written back in the new numbering')
 
     def test_garbage_settings_are_ignored(self):
         with mock.patch.object(command, 'load_settings', return_value={'count': 'lots', 'pattern_type': 'spiral', 'preset': 'gone'}):

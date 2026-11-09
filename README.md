@@ -53,14 +53,14 @@ Manual install: copy the `FormulaPattern` folder to
 3. **Direction** (a linear edge, sketch line or construction axis) or **Axis**
    (also circular edges and cylindrical faces); a Path takes two directions.
    **Flip direction** sends the copies the other way.
-4. **Copies**: how many new copies. The original stays and is copy 0; the
-   formula runs for `i = 1 … Copies`.
+4. **Copies**: how many new copies. The original stays and is item
+   `i = 1`; the formulas run for the copies, `i = 2 … Copies + 1`.
 5. **Formula**: pick a **Preset** or write your own. **Formula gives** chooses
    what the formula means:
    * *Distance from original* (or *Angle from original*): the formula is
-     where copy `i` sits, measured from the original.
+     where item `i` sits, measured from the original.
    * *Gap to previous* (or *Angle step from previous*): the formula is the
-     step from copy `i-1` to copy `i`; the positions add up.
+     step from item `i-1` to item `i`; the positions add up.
 6. **a, b, c** are values you can use inside the formula. `a` carries units
    (a length for linear, an angle for circular), so `25.5 in` works; `b` and
    `c` are plain numbers.
@@ -78,8 +78,8 @@ Manual install: copy the `FormulaPattern` folder to
 Example, fret slots for a 25.5" scale: model the slot as a cut at the nut,
 choose *Object type: Features*, click the slot cut, click an edge running
 along the neck, set *Copies* to 22, pick the **Guitar frets (12-TET)** preset
-and set `a` to `25.5 in`. The preview shows fret 12 at exactly half the
-scale. OK.
+and set `a` to `25.5 in`. The preview shows fret 12 (row `i = 13`, the nut
+being item 1) at exactly half the scale. OK.
 
 ### In a sketch
 
@@ -103,12 +103,12 @@ line down the neck, and pattern the slot along it.
 | Preset | Formula gives | Formula | Tunables |
 |---|---|---|---|
 | Constant spacing | gap | `a` | a = gap |
-| Guitar frets (12-TET) | distance | `a * (1 - 1 / 2^(i / 12))` | a = scale length |
-| Growing gaps (geometric) | gap | `a * b^(i - 1)` | a = first gap, b = growth factor |
-| Growing gaps (arithmetic) | gap | `a + b * (i - 1)` | a = first gap, b = increase per gap |
+| Guitar frets (12-TET) | distance | `a * (1 - 1 / 2^((i - 1) / 12))` | a = scale length |
+| Growing gaps (geometric) | gap | `a * b^(i - 2)` | a = first gap, b = growth factor |
+| Growing gaps (arithmetic) | gap | `a + b * (i - 2)` | a = first gap, b = increase per gap |
 | Ease in & out (sine) | distance | `a * (1 - cos(pi * t)) / 2` | a = total extent |
 | Ease in (power) | distance | `a * t^b` | a = total extent, b = curve |
-| Fibonacci gaps | gap | `a * fib(i)` | a = first gap |
+| Fibonacci gaps | gap | `a * fib(i - 1)` | a = first gap |
 | Golden angle (circular only) | angle step | `a` | a = 137.508° |
 
 Path presets (two formulas): Archimedean spiral, Logarithmic spiral,
@@ -121,9 +121,9 @@ you typed are kept.
 
 | Name | Meaning |
 |---|---|
-| `i` | copy number, 1 … n |
+| `i` | item number: the original is 1, the copies are 2 … n + 1 |
 | `n` | number of copies |
-| `t` | `i / n`, runs 0 → 1 (handy for easing) |
+| `t` | `(i - 1) / n`: 0 at the original, 1 at the last copy (handy for easing) |
 | `a`, `b`, `c` | the three values in the dialog |
 | any user parameter | by name, in document units (angles in degrees) |
 
@@ -134,9 +134,13 @@ Functions: `sin cos tan asin acos atan atan2` (radians), `sind cosd tand`
 `abs floor ceil round trunc`, `min max clamp(x, lo, hi) sign hypot`,
 `fib(i)`. Constants `pi e tau phi`.
 
+The original is item 1 and is never changed; the formulas are evaluated
+for the copies, so `a * (i - 1)` is an even spacing and `i^1.4` as a Size
+grows from the first copy (×2.64, ×4.66 …).
+
 Results are in the document's length unit (linear) or degrees (circular).
 Angles are reduced modulo 360. A copy that lands on the original is an
-error that names the copy; two copies on the same spot are a warning.
+error that names its item number; two copies on the same spot are a warning.
 
 ### What you get in the timeline
 

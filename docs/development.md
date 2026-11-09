@@ -33,8 +33,13 @@ install.ps1 / install.sh        link the add-in into Fusion's AddIns folder
 `ast`, validates it against a whitelist (names, calls, arithmetic,
 comparisons, conditionals; no attributes, subscripts or strings) and
 evaluates it in floats with overflow and complex-result guards.
-`compute_positions(PatternSpec)` runs it for `i = 1 … n`, applies the
-position / gap mode, flip and the 360° wrap, and reports errors per copy.
+`compute_positions(PatternSpec)` runs it for the copies, items
+`i = 2 … n + 1` (the original is item 1; `t = (i - 1) / n`), applies the
+position / gap mode, flip and the 360° wrap, and reports errors per item.
+Before 1.3 the first copy was `i = 1`: `renumber_from_copies()` rewrites
+such a formula with `(i - 1)`, and `command._modern_settings()` applies it
+to settings (saved patterns, the remembered values) that lack the
+`numbering` key 1.3 writes.
 `PRESETS` is the preset table; `preview_html` renders the preview box.
 
 **command.py** owns everything Fusion-facing:
